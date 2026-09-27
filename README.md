@@ -4,17 +4,28 @@
 
 ## How it fits together
 
-```
-Browser ─► CloudFront
-            ├─ /*                        S3 (React SPA, private, OAC)
-            └─ /api/* /auth/aws/* /agent-api/*  ─► VPC origin ─► internal ALB
-                                                                  ├─► api   :3005  Node/Express
-                                                                  └─► agent :8000  Python/FastAPI
-ECS Fargate task (ARM64): api + agent
-  api    Cognito sign-in, users & roles, AWS accounts, integrations  → PostgreSQL (RDS)
-  agent  Terraform agent + knowledge-base chat                       → SQLite + workspaces on EFS
-         Bedrock (Converse) for models · Tavily for Terraform doc search
-Terraform runs ONLY as an AegisProvisioner-* role in the target account (STS + ExternalId)
+```mermaid
+flowchart LR
+  browser(["Browser"]) --> cf["CloudFront"]
+  cf -- "/*" --> s3[("S3<br/>React SPA, private, OAC")]
+  cf -- "/api/* /auth/aws/* /agent-api/*" --> vpco["VPC origin"] --> alb["Internal ALB"]
+
+  subgraph ecs["ECS Fargate task (ARM64)"]
+    api["api :3005<br/>Node / Express<br/>sign-in, users and roles,<br/>AWS accounts, integrations"]
+    agent["agent :8000<br/>Python / FastAPI<br/>Terraform agent + KB chat"]
+  end
+
+  alb -- "default" --> api
+  alb -- "/agent-api/*" --> agent
+  agent -- "authorize with caller's token" --> api
+
+  api --> cognito["Cognito<br/>authenticates"]
+  api --> rds[("PostgreSQL (RDS)<br/>authorizes")]
+  agent --> efs[("EFS<br/>SQLite + run workspaces")]
+  agent --> bedrock["Bedrock Converse"]
+  agent --> tavily["Tavily<br/>Terraform doc search"]
+  agent -- "STS AssumeRole + ExternalId" --> role["AegisProvisioner-* role<br/>in the target account"]
+  role -- "the only identity Terraform runs as" --> target[("Target AWS account")]
 ```
 
 | Folder | What it is |
