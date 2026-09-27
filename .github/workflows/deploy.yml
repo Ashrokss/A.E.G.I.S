@@ -1,0 +1,121 @@
+name: deploy
+
+# main -> prod. The job runs in the protected `prod` environment (add a required
+# reviewer in GitHub settings); the deploy role trusts ONLY that environment.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false # never interrupt an apply
+
+permissions:
+  id-token: write # GitHub OIDC -> AWS, no stored keys
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  TF_DIR: infra/terraform/environments/prod
+  TAG: ${{ github.sha }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.13.3, terraform_wrapper: false }
+
+      - name: terraform init
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          ALARM_EMAIL: ${{ vars.ALARM_EMAIL }}
+          MODEL_CHAT: ${{ vars.BEDROCK_MODEL_CHAT }}
+          MODEL_CODEGEN: ${{ vars.BEDROCK_MODEL_CODEGEN }}
+          MODEL_EMBED: ${{ vars.BEDROCK_EMBED_MODEL }}
+        run: |
+          printf 'bucket = "%s"\nregion = "%s"\n' "$TF_STATE_BUCKET" "$AWS_REGION" > "$TF_DIR/backend.hcl"
+          {
+            printf 'account_id            = "%s"\n' "$ACCOUNT_ID"
+            printf 'alarm_email           = "%s"\n' "$ALARM_EMAIL"
+            printf 'bedrock_model_chat    = "%s"\n' "$MODEL_CHAT"
+            printf 'bedrock_model_codegen = "%s"\n' "$MODEL_CODEGEN"
+            printf 'bedrock_embed_model   = "%s"\n' "$MODEL_EMBED"
+          } > "$TF_DIR/terraform.tfvars"
+          terraform -chdir="$TF_DIR" init -input=false -backend-config=backend.hcl
+
+      # ECR must exist before images can be pushed. A no-op after the first run.
+      - name: ensure image repositories
+        run: terraform -chdir="$TF_DIR" apply -input=false -auto-approve -var "image_tag=$TAG" -target=module.stack.module.ecr
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - name: build + push images (linux/arm64, tag = git sha)
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          for svc in api agent; do
+            if aws ecr describe-images --repository-name "aegis/$svc" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+              echo "$svc:$TAG already in ECR (tags are immutable) - skipping build"
+              continue
+            fi
+            docker buildx build --platform linux/arm64 --push -t "$REGISTRY/aegis/$svc:$TAG" \
+              --cache-from "type=gha,scope=$svc" --cache-to "type=gha,mode=max,scope=$svc" "./$svc"
+          done
+
+      - name: plan (refuse destructive drift)
+        run: |
+          terraform -chdir="$TF_DIR" plan -input=false -var "image_tag=$TAG" -out=deploy.tfplan
+          # Task definitions are immutable and versioned, so a new image tag is
+          # always delete+create of the revision: that IS the deploy. Any OTHER
+          # delete/replace means the infrastructure drifted: stop for a human.
+          DESTROYS="$(terraform -chdir="$TF_DIR" show -json deploy.tfplan | jq -r \
+            '[.resource_changes[]? | select(.type != "aws_ecs_task_definition")
+              | select(.change.actions[] | . == "delete" or . == "replace") | .address] | join(", ")')"
+          if [ -n "$DESTROYS" ]; then
+            echo "::error::Plan destroys or replaces: $DESTROYS. Review and apply by hand."
+            exit 1
+          fi
+
+      - name: apply
+        run: terraform -chdir="$TF_DIR" apply -input=false deploy.tfplan
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: web/package-lock.json }
+
+      - name: build + publish web
+        run: |
+          out() { terraform -chdir="$TF_DIR" output -json "$1"; }
+          export VITE_COGNITO_DOMAIN="$(out web_build_env | jq -r .VITE_COGNITO_DOMAIN)"
+          export VITE_COGNITO_CLIENT_ID="$(out web_build_env | jq -r .VITE_COGNITO_CLIENT_ID)"
+          BUCKET="$(out web_bucket | jq -r .)"
+          DIST="$(out distribution_id | jq -r .)"
+          (cd web && npm ci && npm run build)
+          # Hashed assets cache forever; index.html must always revalidate.
+          aws s3 sync web/dist "s3://$BUCKET" --delete --exclude index.html \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp web/dist/index.html "s3://$BUCKET/index.html" --cache-control "no-cache"
+          aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/index.html" >/dev/null
+
+      - name: wait for ECS + smoke test
+        run: |
+          CLUSTER="$(terraform -chdir="$TF_DIR" output -raw ecs_cluster)"
+          SERVICE="$(terraform -chdir="$TF_DIR" output -raw ecs_service)"
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+          URL="$(terraform -chdir="$TF_DIR" output -raw app_url)"
+          # /auth/* reaches the api through CloudFront -> ALB; / is the SPA from S3.
+          curl -fsS -o /dev/null "$URL/auth/aws/config-status" && curl -fsS -o /dev/null "$URL/"
+          echo "Deployed $TAG to $URL" >> "$GITHUB_STEP_SUMMARY"

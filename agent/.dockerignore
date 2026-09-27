@@ -1,0 +1,32 @@
+# This service's build context is ./agent, so the repo-root
+# .dockerignore does NOT apply here — Docker only reads <context>/.dockerignore.
+# Without this file, `COPY . .` baked ~2.5 GB of run workspaces (Terraform
+# provider binaries) into the image on every build.
+
+# Run workspaces and the run database. `data/` is bind-mounted by
+# docker-compose.yml, so a baked copy is shadowed at runtime anyway, and a baked
+# runs.db would ship stale runs into a fresh container.
+data/
+runs.db
+
+**/.terraform/
+**/.terraform.lock.hcl
+**/*.tfstate
+**/*.tfstate.backup
+**/tfplan
+
+**/__pycache__
+**/*.pyc
+
+**/.env
+**/.env.*
+!**/.env.example
+
+**/.git
+**/.vscode
+**/.idea
+**/.DS_Store
+**/Thumbs.db
+.deps/
+.venv/
+tests/

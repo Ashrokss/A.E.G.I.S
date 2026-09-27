@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars (gitignored). Only per-ACCOUNT values belong here.
+account_id  = "123456789012"
+alarm_email = "you@example.com"
+
+# Bedrock model ids (enable model access in the Bedrock console first).
+# Leave blank for mock mode.
+bedrock_model_chat    = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+bedrock_model_codegen = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+bedrock_embed_model   = "amazon.titan-embed-text-v2:0"
+
+# image_tag is passed by CI: -var image_tag=<git sha>

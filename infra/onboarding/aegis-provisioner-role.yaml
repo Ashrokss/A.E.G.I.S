@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AEGIS provisioning role. Lets AEGIS run Terraform in this account, and nothing
+  more: PowerUserAccess for ordinary resources, plus IAM limited to roles that
+  carry the AegisBoundary permissions boundary, so no role AEGIS creates can
+  exceed that boundary or modify this role.
+
+Parameters:
+  TrustedRoleArn:
+    Type: String
+    Description: The AEGIS ECS task role (shown on the AEGIS Accounts page).
+    AllowedPattern: "^arn:aws:iam::[0-9]{12}:role/.+$"
+  ExternalId:
+    Type: String
+    Description: The ExternalId AEGIS generated for this onboarding. Do not change it.
+    MinLength: 16
+  RoleSuffix:
+    Type: String
+    Default: default
+    Description: Distinguishes several AEGIS roles in one account (a-z, 0-9, dash).
+    AllowedPattern: "^[a-z0-9-]{1,32}$"
+
+Resources:
+  # Every role the agent creates must carry this boundary. It allows ordinary
+  # service actions and denies the paths to privilege escalation.
+  AegisBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub AegisBoundary-${RoleSuffix}
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowWorkloads
+            Effect: Allow
+            Action: "*"
+            Resource: "*"
+          - Sid: NoIdentityEscalation
+            Effect: Deny
+            Action:
+              - iam:CreateUser
+              - iam:CreateAccessKey
+              - iam:CreateLoginProfile
+              - iam:UpdateLoginProfile
+              - iam:AddUserToGroup
+              - iam:AttachUserPolicy
+              - iam:PutUserPolicy
+              - iam:DeleteRolePermissionsBoundary
+              - iam:DeleteUserPermissionsBoundary
+              - organizations:*
+              - account:*
+            Resource: "*"
+          - Sid: ProtectAegisControlPlane
+            Effect: Deny
+            Action: iam:*
+            Resource:
+              - !Sub arn:aws:iam::${AWS::AccountId}:role/AegisProvisioner-*
+              - !Sub arn:aws:iam::${AWS::AccountId}:policy/AegisBoundary-*
+
+  ProvisionerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub AegisProvisioner-${RoleSuffix}
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref TrustedRoleArn
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      ManagedPolicyArns:
+        # Everything except IAM / Organizations / Account management.
+        - arn:aws:iam::aws:policy/PowerUserAccess
+      Policies:
+        - PolicyName: BoundedIam
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Creating a role, or granting one permissions, requires the boundary.
+              - Sid: RolesMustCarryBoundary
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:PutRolePermissionsBoundary
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    iam:PermissionsBoundary: !Ref AegisBoundary
+              - Sid: ManageRolesAndPolicies
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:ListRoles
+                  - iam:ListRoleTags
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:UpdateRole
+                  - iam:UpdateRoleDescription
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:DeleteRole
+                  - iam:PassRole
+                  - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListInstanceProfilesForRole
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:GetInstanceProfile
+                  - iam:ListInstanceProfiles
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:TagInstanceProfile
+                  - iam:CreatePolicy
+                  - iam:DeletePolicy
+                  - iam:CreatePolicyVersion
+                  - iam:DeletePolicyVersion
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:ListPolicies
+                  - iam:ListPolicyVersions
+                  - iam:TagPolicy
+                  - iam:CreateServiceLinkedRole
+                Resource: "*"
+              # Never touch the AEGIS control plane itself, whatever the above allows.
+              - Sid: ProtectAegisControlPlane
+                Effect: Deny
+                NotAction:
+                  - iam:GetRole
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/AegisProvisioner-*
+                  - !Sub arn:aws:iam::${AWS::AccountId}:policy/AegisBoundary-*
+              - Sid: NoBoundaryRemoval
+                Effect: Deny
+                Action:
+                  - iam:DeleteRolePermissionsBoundary
+                  - iam:CreateUser
+                  - iam:CreateAccessKey
+                  - iam:CreateLoginProfile
+                Resource: "*"
+
+Outputs:
+  RoleArn:
+    Description: Paste this into AEGIS to finish onboarding.
+    Value: !GetAtt ProvisionerRole.Arn
+  BoundaryArn:
+    Description: Permissions boundary every AEGIS-created role must carry.
+    Value: !Ref AegisBoundary

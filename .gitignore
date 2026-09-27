@@ -1,0 +1,41 @@
+# Dependencies / builds
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Secrets — configuration comes from the root .env (gitignored) or Secrets Manager
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+**/terraform.tfvars
+**/backend.hcl
+
+# Runtime data
+agent/data/*
+!agent/data/.gitkeep
+**/runs.db
+__pycache__/
+*.pyc
+
+# Terraform
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.backup
+**/tfplan*
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/*
+!.claude/settings.json
+
+# Test artefacts
+web/test-results/
+web/playwright-report/
+.venv/
+.deps/
+.playwright-mcp/

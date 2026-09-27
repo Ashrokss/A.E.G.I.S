@@ -1,0 +1,5 @@
+# Set default behavior to automatically guess line endings
+* text=auto
+
+# Force LF for shell scripts
+*.sh text eol=lf

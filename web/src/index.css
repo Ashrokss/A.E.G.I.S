@@ -1,0 +1,171 @@
+@import "tailwindcss";
+
+/* Tokens. Colour is semantic: teal = moving / create, amber = needs you /
+   update, red = destroy. Nothing else is coloured. */
+@theme {
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-teal: var(--teal);
+  --color-amber: var(--amber);
+  --color-rust: var(--rust);
+  --color-on-accent: var(--on-accent);
+}
+
+:root {
+  --bg: #16191e;
+  --surface: #1e2228;
+  --raised: #272c33;
+  --line: #353b44;
+  --fg: #e4e7eb;
+  --muted: #98a1ac;
+  --teal: #39bfae;
+  --amber: #f0a63a;
+  --rust: #e8604f;
+  --on-accent: #0f1a19;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f2f4f6;
+    --surface: #ffffff;
+    --raised: #e9edf0;
+    --line: #d3d9df;
+    --fg: #1c2127;
+    --muted: #5c6670;
+    --teal: #13857a;
+    --amber: #a8650a;
+    --rust: #c23f2f;
+    --on-accent: #ffffff;
+    color-scheme: light;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: #f2f4f6;
+  --surface: #ffffff;
+  --raised: #e9edf0;
+  --line: #d3d9df;
+  --fg: #1c2127;
+  --muted: #5c6670;
+  --teal: #13857a;
+  --amber: #a8650a;
+  --rust: #c23f2f;
+  --on-accent: #ffffff;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--teal) 35%, transparent);
+}
+
+/* Horizontal strips (nav, phase rail) scroll without a visible bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+
+/* Agent markdown */
+.prose-aegis {
+  overflow-wrap: anywhere;
+}
+.prose-aegis p,
+.prose-aegis ul,
+.prose-aegis ol,
+.prose-aegis pre,
+.prose-aegis table {
+  margin: 0 0 0.6em;
+}
+.prose-aegis > :last-child {
+  margin-bottom: 0;
+}
+.prose-aegis ul {
+  list-style: disc;
+  padding-left: 1.2em;
+}
+.prose-aegis ol {
+  list-style: decimal;
+  padding-left: 1.2em;
+}
+.prose-aegis a {
+  color: var(--teal);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-aegis code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--raised);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.prose-aegis pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75em;
+  overflow-x: auto;
+}
+.prose-aegis pre code {
+  background: none;
+  padding: 0;
+}
+.prose-aegis h1,
+.prose-aegis h2,
+.prose-aegis h3 {
+  font-weight: 600;
+  margin: 0.8em 0 0.3em;
+}
+.prose-aegis table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+.prose-aegis th,
+.prose-aegis td {
+  border: 1px solid var(--line);
+  padding: 0.3em 0.6em;
+  text-align: left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,50 @@
+# Local development: postgres + api + agent. The web app runs outside compose:
+#   cd web && npm run dev      (Vite proxies /api, /auth, /agent-api here)
+services:
+  postgres:
+    image: public.ecr.aws/docker/library/postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aegis}
+      POSTGRES_USER: ${POSTGRES_USER:-aegis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-aegis}"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: ./api
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      HOME: /home/node
+    ports:
+      - "127.0.0.1:3005:3005"
+    volumes:
+      - ${HOME:-~}/.aws:/home/node/.aws:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  agent:
+    build: ./agent
+    env_file: .env
+    environment:
+      BACKEND_INTERNAL_URL: http://api:3005
+      AGENT_DB_PATH: /app/data/runs.db
+      AGENT_WORKSPACE_DIR: /app/data/runs
+      TF_PLUGIN_CACHE_DIR: /app/data/tf-plugin-cache
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./agent/data:/app/data
+      - ${HOME:-~}/.aws:/home/aegis/.aws:ro
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
