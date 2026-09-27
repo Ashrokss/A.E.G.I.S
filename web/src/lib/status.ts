@@ -3,7 +3,7 @@ import type { RunStatus } from "./types";
 export type Tone = "teal" | "amber" | "rust" | "muted";
 
 export const STATUS: Record<RunStatus, { label: string; tone: Tone; working: boolean }> = {
-  PENDING_INTAKE: { label: "Waiting to be claimed", tone: "muted", working: false },
+  PENDING_INTAKE: { label: "Waiting to start", tone: "muted", working: false },
   IDLE: { label: "Reading your request", tone: "teal", working: true },
   AWAITING_INPUT: { label: "Waiting for you", tone: "amber", working: false },
   PLANNING: { label: "Planning", tone: "teal", working: true },

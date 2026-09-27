@@ -43,6 +43,14 @@ docker compose exec api node scripts/create-admin.js you@example.com
 
 Leave the `BEDROCK_MODEL*` values blank to run the agent in mock mode.
 
+**Just looking at the UI?** No backend, Docker, AWS or `.env` needed:
+
+```bash
+cd web && npm install && npm run demo   # http://localhost:5173, then click Sign in
+```
+
+Demo mode answers every API call from an in-memory mock (`web/demo/mockApi.ts`) and signs you in as a demo admin. Approving, sending messages, starting runs and connecting accounts all work against the mock; restarting the command resets the data. None of it is included in a normal build.
+
 ## Tests
 
 ```bash

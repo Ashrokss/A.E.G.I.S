@@ -4,7 +4,7 @@
 
 - **agent/**: Python 3.11, FastAPI, Pydantic 2, SQLite through the stdlib `sqlite3` module with raw SQL (`runs.db`, no ORM, no migration tool: `CREATE TABLE IF NOT EXISTS` plus additive `ALTER TABLE` wrapped in `except sqlite3.OperationalError`). Port 8000. Routes are declared as `/api/*`; the public prefix `/agent-api/*` is mapped onto them by `_strip_public_prefix` in `main.py` (the ALB cannot rewrite paths).
 - **api/**: Node 20, Express 4, `pg` with raw SQL. Port 3005. `src/db/pool.js` is the only module that constructs the pool; `migrations/NNN_*.sql` are applied in order at start-up by `src/db/migrate.js`.
-- **web/**: React 19, Vite, TypeScript, Tailwind v4, TanStack Query, react-router. No component kit: native `<dialog>` and a few primitives in `src/components/ui.tsx`.
+- **web/**: React 19, Vite, TypeScript, Tailwind v4, TanStack Query, react-router, GSAP (`gsap` + `@gsap/react`: `useGSAP` with a `scope`, plugins registered once per module; the sign-in page is one timeline) and motion. Components: shadcn/ui in `src/components/ui/` and SmoothUI (shadcn registry `@smoothui`, see `web/components.json`) in `src/components/smoothui/`, added with `npx shadcn@latest add ...`. Both are themed by the AEGIS tokens in `src/index.css` (shadcn/SmoothUI token names map onto `--teal`, `--amber`, `--rust`, ...; `dark:` follows the OS or `data-theme`). Screens use the wrappers in `src/components/ui.tsx` (Button, Dialog, Field, Page, Panel, RowMenu). Token clash to remember: AEGIS `muted` is the grey TEXT colour, so any `bg-muted` in a newly added shadcn/SmoothUI component must become `bg-raised`.
 - **infra/**: Terraform (AWS provider ~> 6.0) and one CloudFormation template.
 
 ## Invariants (do not break)

@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { request } from "../../lib/api";
-import { useAccounts, useConnections } from "../../lib/hooks";
-import { Button, Dialog, ErrorNote, Field, inputClass } from "../../components/ui";
+import { ChevronRight } from "lucide-react";
+import { request } from "@/lib/api";
+import { useAccounts, useConnections } from "@/lib/hooks";
+import { Button, Dialog, ErrorNote, Field, inputClass } from "@/components/ui";
+import AISuggestions from "@/components/smoothui/ai-suggestions";
 
-type Created = { id: string };
+export const STARTERS = [
+  "A private S3 bucket for build artifacts, versioned, encrypted, expiring after 90 days",
+  "An SQS queue with a dead-letter queue and an SNS topic that fans out to it",
+  "A VPC with public and private subnets across two availability zones",
+].map((label, i) => ({ id: String(i), label }));
 
 export default function NewRunDialog({
   goal,
@@ -36,7 +42,7 @@ export default function NewRunDialog({
 
   const create = useMutation({
     mutationFn: () =>
-      request<Created>("/agent-api/runs", {
+      request<{ id: string }>("/agent-api/runs", {
         body: {
           goal: text.trim(),
           aws_account_id: account,
@@ -51,34 +57,34 @@ export default function NewRunDialog({
   const noAccounts = accounts.isSuccess && accounts.data.length === 0;
 
   return (
-    <Dialog open={goal !== null} onClose={onClose} title="New run" wide>
+    <Dialog open={goal !== null} onClose={onClose} title="New run" description="Describe the change in plain language." wide>
       <form
-        className="grid gap-4"
+        className="grid gap-5"
         onSubmit={(e) => {
           e.preventDefault();
           create.mutate();
         }}
       >
-        <Field label="What should AEGIS build or change?">
-          <textarea
-            required
-            rows={4}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            className={`${inputClass} h-auto py-2`}
-            placeholder="A private S3 bucket for build artifacts with versioning and 90-day expiry"
-          />
-        </Field>
+        <textarea
+          required
+          rows={4}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          aria-label="What should AEGIS build or change?"
+          className={`${inputClass} h-auto py-3 text-[15px] leading-relaxed`}
+          placeholder="A private S3 bucket for build artifacts with versioning and a 90-day expiry"
+        />
+        {!text.trim() && <AISuggestions label="Or start from" suggestions={STARTERS} onSelect={(s) => setText(s.label)} />}
 
         {noAccounts ? (
-          <p className="rounded-md border border-amber/40 bg-amber/10 px-3 py-2 text-sm">
-            Connect an AWS account first. AEGIS only ever runs Terraform in accounts you onboard.{" "}
+          <p className="rounded-xl border border-amber/35 bg-amber/[0.06] px-4 py-3 text-sm">
+            Connect an AWS account first. AEGIS only runs in accounts you connect.{" "}
             <Link to="/accounts" className="text-teal underline" onClick={onClose}>
-              Go to Accounts
+              Connect an account
             </Link>
           </p>
         ) : (
-          <Field label="AWS account" hint="Terraform runs here, through the AEGIS role you deployed in it.">
+          <Field label="AWS account">
             <select required value={account} onChange={(e) => setAccount(e.target.value)} className={inputClass}>
               {accounts.data?.map((a) => (
                 <option key={a.id} value={a.accountId}>
@@ -89,37 +95,44 @@ export default function NewRunDialog({
           </Field>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="GitHub repository" hint="Optional. AEGIS follows its conventions and opens a pull request.">
-            <select value={github} onChange={(e) => setGithub(e.target.value)} className={inputClass}>
-              <option value="">None</option>
-              {githubConns.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.displayName}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Jira" hint="Optional. Links the run to a ticket.">
-            <select value={jira} onChange={(e) => setJira(e.target.value)} className={inputClass}>
-              <option value="">None</option>
-              {jiraConns.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.displayName}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-        {jira && (
-          <Field label="Ticket key">
-            <input value={ticket} onChange={(e) => setTicket(e.target.value)} className={inputClass} placeholder="OPS-142" />
-          </Field>
-        )}
-        {github && <RepoStatus connectionId={github} />}
+        <details className="group rounded-xl border border-line" open={!!github || !!jira}>
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm">
+            <ChevronRight className="size-4 text-muted transition-transform group-open:rotate-90" aria-hidden />
+            GitHub and Jira
+            <span className="ml-auto text-xs text-muted">Optional</span>
+          </summary>
+          <div className="grid gap-4 border-t border-line p-4">
+            <Field label="GitHub repository" hint="AEGIS follows its conventions and opens a pull request.">
+              <select value={github} onChange={(e) => setGithub(e.target.value)} className={inputClass}>
+                <option value="">None</option>
+                {githubConns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.displayName}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {github && <RepoStatus connectionId={github} />}
+            <Field label="Jira">
+              <select value={jira} onChange={(e) => setJira(e.target.value)} className={inputClass}>
+                <option value="">None</option>
+                {jiraConns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.displayName}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {jira && (
+              <Field label="Ticket key">
+                <input value={ticket} onChange={(e) => setTicket(e.target.value)} className={inputClass} placeholder="OPS-142" />
+              </Field>
+            )}
+          </div>
+        </details>
 
         <ErrorNote error={create.error} />
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
@@ -132,26 +145,24 @@ export default function NewRunDialog({
   );
 }
 
-type Analysis = { status: string; repo?: string; target_dir?: string; analyzed_at?: string };
-
 function RepoStatus({ connectionId }: { connectionId: string }) {
   const q = useQuery({
     queryKey: ["repo-analysis", connectionId],
-    queryFn: () => request<Analysis>(`/agent-api/repo-analysis/by-connection/${encodeURIComponent(connectionId)}`),
+    queryFn: () => request<{ status: string }>(`/agent-api/repo-analysis/by-connection/${encodeURIComponent(connectionId)}`),
   });
   const analyse = useMutation({
-    mutationFn: () => request<Analysis>("/agent-api/repo-analysis", { body: { github_connection_id: connectionId } }),
+    mutationFn: () => request("/agent-api/repo-analysis", { body: { github_connection_id: connectionId } }),
     onSuccess: () => q.refetch(),
   });
   if (!q.data) return null;
   return q.data.status === "not_analyzed" ? (
-    <p className="flex flex-wrap items-center gap-3 text-sm text-muted">
+    <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
       AEGIS hasn't read this repository's conventions yet.
       <Button type="button" size="sm" onClick={() => analyse.mutate()} busy={analyse.isPending}>
         Learn conventions
       </Button>
-    </p>
+    </div>
   ) : (
-    <p className="text-sm text-muted">Repository conventions learned. New code will follow them.</p>
+    <p className="text-sm text-muted">Conventions learned. New code will follow them.</p>
   );
 }

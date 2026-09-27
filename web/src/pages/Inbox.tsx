@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { request } from "../lib/api";
-import { useAccounts, useConnections } from "../lib/hooks";
-import type { InboxItem } from "../lib/types";
-import { STATUS } from "../lib/status";
-import { ago } from "../lib/format";
-import { Button, Dialog, Dot, Empty, ErrorNote, Field, PageHeader, inputClass } from "../components/ui";
+import { ChevronRight } from "lucide-react";
+import { request } from "@/lib/api";
+import { useAccounts, useConnections } from "@/lib/hooks";
+import type { InboxItem } from "@/lib/types";
+import { STATUS } from "@/lib/status";
+import { ago } from "@/lib/format";
+import { Button, Dialog, Dot, Empty, ErrorNote, Field, Page, PageHeader, Panel, RowSkeleton, inputClass } from "@/components/ui";
 
 export default function Inbox() {
-  const [claiming, setClaiming] = useState<InboxItem | null>(null);
+  const [starting, setStarting] = useState<InboxItem | null>(null);
   const inbox = useQuery({
     queryKey: ["inbox"],
     queryFn: () => request<InboxItem[]>("/agent-api/runs/inbox"),
@@ -19,65 +20,72 @@ export default function Inbox() {
   const active = inbox.data?.filter((i) => i.state === "active") ?? [];
 
   return (
-    <div className="mx-auto grid max-w-4xl gap-8 px-6 py-8">
-      <PageHeader
-        title="Inbox"
-        description="Jira tickets labelled for AEGIS arrive here. Claim one to choose the AWS account it runs in; nothing starts until you do."
-      />
-      <section className="grid gap-3">
-        <h2 className="font-semibold">Waiting to be claimed</h2>
-        {pending.length === 0 ? (
-          <Empty title="Nothing waiting">New tickets appear here when the Jira intake is turned on.</Empty>
-        ) : (
-          <ul className="divide-y divide-line rounded-lg border border-line">
+    <Page>
+      <PageHeader title="Inbox" description="Jira tickets labelled for AEGIS wait here. Start one and choose the AWS account it runs in." />
+
+      {inbox.isLoading ? (
+        <RowSkeleton rows={2} />
+      ) : pending.length === 0 ? (
+        <Empty title="Nothing waiting">New tickets appear here when the Jira intake is on.</Empty>
+      ) : (
+        <Panel>
+          <ul className="divide-y divide-line">
             {pending.map((i) => (
-              <li key={i.id} className="flex flex-wrap items-center gap-4 px-4 py-3">
-                <span className="font-mono text-xs text-muted">{i.ticket_key}</span>
-                <span className="min-w-0 flex-1">{i.summary}</span>
-                <span className="text-xs text-muted">{ago(i.created_at)}</span>
-                <Button size="sm" variant="primary" onClick={() => setClaiming(i)}>
-                  Claim
+              <li key={i.id} className="flex items-center gap-4 px-5 py-4">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate">{i.summary}</p>
+                  <p className="mt-0.5 text-sm text-muted">
+                    <span className="font-mono text-xs">{i.ticket_key}</span>
+                    <span className="px-1.5 text-line">/</span>
+                    {ago(i.created_at)}
+                  </p>
+                </div>
+                <Button size="sm" variant="primary" onClick={() => setStarting(i)}>
+                  Start
                 </Button>
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </Panel>
+      )}
+
       {active.length > 0 && (
         <section className="grid gap-3">
-          <h2 className="font-semibold">Your ticket runs in progress</h2>
-          <ul className="divide-y divide-line rounded-lg border border-line">
-            {active.map((i) => {
-              const s = STATUS[i.status];
-              return (
-                <li key={i.id}>
-                  <Link to={`/runs/${i.id}`} className="flex items-center gap-4 px-4 py-3 hover:bg-raised/50">
-                    <span className="font-mono text-xs text-muted">{i.ticket_key}</span>
-                    <span className="min-w-0 flex-1">{i.summary}</span>
-                    <span className="inline-flex items-center gap-2 text-xs text-muted">
+          <h2 className="text-sm font-medium text-muted">In progress</h2>
+          <Panel>
+            <ul className="divide-y divide-line">
+              {active.map((i) => {
+                const s = STATUS[i.status];
+                return (
+                  <li key={i.id}>
+                    <Link to={`/runs/${i.id}`} className="flex items-center gap-4 px-5 py-4 hover:bg-raised/60">
                       <Dot tone={s.tone} pulse={s.working} />
-                      {s.label}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate">{i.summary}</p>
+                        <p className="mt-0.5 text-sm text-muted">{s.label}</p>
+                      </div>
+                      <ChevronRight className="size-4 text-muted" aria-hidden />
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </Panel>
         </section>
       )}
-      <ClaimDialog item={claiming} onClose={() => setClaiming(null)} />
-    </div>
+      <StartDialog item={starting} onClose={() => setStarting(null)} />
+    </Page>
   );
 }
 
-function ClaimDialog({ item, onClose }: { item: InboxItem | null; onClose: () => void }) {
+function StartDialog({ item, onClose }: { item: InboxItem | null; onClose: () => void }) {
   const navigate = useNavigate();
   const accounts = useAccounts();
   const connections = useConnections();
   const [account, setAccount] = useState("");
   const [github, setGithub] = useState("");
   const [jira, setJira] = useState("");
-  const claim = useMutation({
+  const start = useMutation({
     mutationFn: () =>
       request(`/agent-api/runs/${item!.id}/attach`, {
         body: {
@@ -91,15 +99,14 @@ function ClaimDialog({ item, onClose }: { item: InboxItem | null; onClose: () =>
   const pick = (provider: string) => connections.data?.filter((c) => c.provider === provider) ?? [];
 
   return (
-    <Dialog open={!!item} onClose={onClose} title={item ? `Claim ${item.ticket_key}` : ""}>
+    <Dialog open={!!item} onClose={onClose} title={item ? `Start ${item.ticket_key}` : ""} description={item?.summary}>
       <form
         className="grid gap-4"
         onSubmit={(e) => {
           e.preventDefault();
-          claim.mutate();
+          start.mutate();
         }}
       >
-        <p className="text-sm text-muted">{item?.summary}</p>
         <Field label="AWS account">
           <select required value={account} onChange={(e) => setAccount(e.target.value)} className={inputClass}>
             {accounts.data?.map((a) => (
@@ -129,13 +136,13 @@ function ClaimDialog({ item, onClose }: { item: InboxItem | null; onClose: () =>
             ))}
           </select>
         </Field>
-        <ErrorNote error={claim.error} />
-        <div className="flex justify-end gap-2">
+        <ErrorNote error={start.error} />
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" busy={claim.isPending} disabled={!accounts.data?.length}>
-            Claim and start
+          <Button type="submit" variant="primary" busy={start.isPending} disabled={!accounts.data?.length}>
+            Start run
           </Button>
         </div>
       </form>

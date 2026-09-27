@@ -1,40 +1,48 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, SendHorizontal } from "lucide-react";
-import type { FormSpec, JiraTicket, PlanSummary, RunMessage, RunSnapshot, ToolStep } from "../../lib/types";
-import { cn, tryJson } from "../../lib/format";
-import Markdown from "../../components/Markdown";
-import { PlanCounts } from "../../components/PlanGlyph";
-import { Button } from "../../components/ui";
+import { useMemo, useState } from "react";
+import AIMessage from "@/components/smoothui/ai-message";
+import AIReasoning from "@/components/smoothui/ai-reasoning";
+import AIToolCall from "@/components/smoothui/ai-tool-call";
+import AILoader from "@/components/smoothui/ai-loader";
+import AIPromptInput from "@/components/smoothui/ai-prompt-input";
+import type { FormSpec, JiraTicket, PlanSummary, RunMessage, RunSnapshot, ToolStep } from "@/lib/types";
+import { tryJson } from "@/lib/format";
+import Markdown from "@/components/Markdown";
+import Mark from "@/components/Mark";
+import { PlanCounts } from "@/components/PlanGlyph";
+import { Button } from "@/components/ui";
 import FormCard from "./FormCard";
 
 const HIDDEN = new Set(["plan_preview", "tf_step", "internal_log", "approval", "discard"]);
 
-/** Tool steps that ran between the previous message and this one. */
+/** Server timestamps are naive UTC ISO strings. */
+const ts = (s: string) => new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : `${s}Z`).getTime();
+
 function stepsFor(messages: RunMessage[], steps: ToolStep[], index: number) {
   const until = messages[index].created_at;
   const since = index > 0 ? messages[index - 1].created_at : "";
   return steps.filter((s) => s.created_at > since && s.created_at <= until);
 }
 
+/** The AEGIS agent's avatar: the brand mark in a quiet circle. */
+export const AegisAvatar = () => (
+  <span className="grid size-7 shrink-0 place-items-center rounded-full border border-line bg-surface text-teal">
+    <Mark className="size-4" />
+  </span>
+);
+
 export default function Conversation({
   snapshot,
   working,
-  sending,
+  hideLatestPlan,
   onSend,
   onOpenPlan,
-  footer,
-  hideLatestPlan,
 }: {
   snapshot?: RunSnapshot;
   working: boolean;
-  sending: boolean;
+  hideLatestPlan?: boolean;
   onSend: (text: string) => void;
   onOpenPlan: () => void;
-  footer?: ReactNode;
-  hideLatestPlan?: boolean;
 }) {
-  const [text, setText] = useState("");
-  const endRef = useRef<HTMLDivElement>(null);
   const messages = useMemo(() => snapshot?.messages ?? [], [snapshot]);
   const steps = snapshot?.steps ?? [];
   const latestPlan = useMemo(() => messages.map((m) => m.type).lastIndexOf("plan_summary"), [messages]);
@@ -47,103 +55,91 @@ export default function Conversation({
     return null;
   }, [messages]);
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, working]);
-
-  const submit = () => {
-    const t = text.trim();
-    if (!t) return;
-    onSend(t);
-    setText("");
-  };
-
   return (
-    <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <ol className="mx-auto grid max-w-3xl gap-5">
-          {messages.map((m, i) => {
-            if (HIDDEN.has(m.type)) {
-              if (m.type === "approval" || m.type === "discard") {
-                return (
-                  <li key={i} className="text-sm text-muted">
-                    {m.type === "approval" ? "You approved the plan." : "You discarded the plan."}
-                  </li>
-                );
-              }
-              return null;
-            }
-            // While a plan awaits approval, the approval bar stands in for its summary line.
-            if (hideLatestPlan && i === latestPlan) return null;
-            const answered = messages.slice(i + 1).some((n) => n.role === "user");
-            return (
-              <li key={i}>
-                <Entry
-                  message={m}
-                  steps={m.role === "user" ? [] : stepsFor(messages, steps, i)}
-                  answered={answered}
-                  onSend={onSend}
-                  onOpenPlan={onOpenPlan}
-                />
-              </li>
-            );
-          })}
-          {working && (
-            <li className="flex items-center gap-2 text-sm text-muted" aria-live="polite">
-              <span className="size-1.5 animate-pulse rounded-full bg-teal" aria-hidden />
-              {activity ?? "Working…"}
+    <ol className="grid gap-6">
+      {messages.map((m, i) => {
+        if (m.type === "approval" || m.type === "discard") {
+          return (
+            <li key={i} className="text-center text-xs text-muted">
+              {m.type === "approval" ? "You approved the plan" : "You discarded the plan"}
             </li>
-          )}
-        </ol>
-        <div ref={endRef} />
-      </div>
+          );
+        }
+        if (HIDDEN.has(m.type)) return null;
+        if (hideLatestPlan && i === latestPlan) return null;
+        return (
+          <li key={i}>
+            <Entry
+              message={m}
+              steps={m.role === "user" ? [] : stepsFor(messages, steps, i)}
+              since={i > 0 ? messages[i - 1].created_at : m.created_at}
+              answered={messages.slice(i + 1).some((n) => n.role === "user")}
+              onSend={onSend}
+              onOpenPlan={onOpenPlan}
+            />
+          </li>
+        );
+      })}
+      {working && (
+        <li className="flex items-center gap-3" aria-live="polite">
+          <AegisAvatar />
+          <AILoader variant="dots" label={activity ?? "Working"} showElapsed />
+        </li>
+      )}
+    </ol>
+  );
+}
 
-      <div className="mx-auto grid w-full max-w-3xl gap-3 px-5 pb-5">
-        {footer}
-        <form
-          className="flex items-end gap-2 rounded-lg border border-line bg-surface p-2 focus-within:border-teal"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submit();
-          }}
-        >
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            rows={1}
-            placeholder={working ? "AEGIS is working. You can still add context." : "Reply, or ask for a change to the plan"}
-            className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm focus:outline-none"
-            aria-label="Message"
-          />
-          <Button type="submit" variant="primary" size="sm" busy={sending} disabled={!text.trim()} aria-label="Send">
-            <SendHorizontal className="size-4" aria-hidden />
-          </Button>
-        </form>
-      </div>
-    </div>
+/** Message box. While the agent works an empty box offers Stop; typing turns it back into Send (add context). */
+export function Composer({
+  working,
+  onSend,
+  onStop,
+  placeholder,
+}: {
+  working: boolean;
+  onSend: (t: string) => void;
+  onStop?: () => void;
+  placeholder?: string;
+}) {
+  const [draft, setDraft] = useState("");
+  return (
+    <AIPromptInput
+      value={draft}
+      onValueChange={setDraft}
+      state={working ? (onStop && !draft.trim() ? "streaming" : "thinking") : "idle"}
+      onSubmit={(v) => {
+        setDraft("");
+        onSend(v);
+      }}
+      onStop={onStop}
+      placeholder={placeholder ?? (working ? "Add context while AEGIS works" : "Reply, or ask for a change")}
+    />
   );
 }
 
 function Entry({
   message: m,
   steps,
+  since,
   answered,
   onSend,
   onOpenPlan,
 }: {
   message: RunMessage;
   steps: ToolStep[];
+  since: string;
   answered: boolean;
   onSend: (t: string) => void;
   onOpenPlan: () => void;
 }) {
-  const mine = m.role === "user";
+  if (m.role === "user") {
+    return (
+      <AIMessage from="user">
+        <Markdown>{m.content}</Markdown>
+      </AIMessage>
+    );
+  }
 
   if (m.type === "plan_summary") {
     const plan = tryJson<PlanSummary>(m.content);
@@ -151,9 +147,9 @@ function Entry({
     return (
       <button
         onClick={onOpenPlan}
-        className="flex w-full items-center gap-4 rounded-lg border border-line bg-surface px-4 py-3 text-left hover:border-teal"
+        className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 rounded-2xl border border-line bg-surface px-5 py-4 text-left transition-colors hover:border-teal/50"
       >
-        <span className="font-medium">Terraform plan ready</span>
+        <span className="font-medium">Terraform plan</span>
         <PlanCounts counts={plan.counts} className="text-sm" />
         <span className="ml-auto text-sm text-teal">Review</span>
       </button>
@@ -168,71 +164,66 @@ function Entry({
   if (m.type === "jira_tickets") {
     const data = tryJson<{ tickets: JiraTicket[] }>(m.content);
     return (
-      <div className="overflow-x-auto rounded-lg border border-line">
-        <table className="w-full text-sm">
-          <tbody>
-            {data?.tickets.map((t) => (
-              <tr key={t.key} className="border-b border-line last:border-0">
-                <td className="px-3 py-2 font-mono text-xs whitespace-nowrap text-muted">{t.key}</td>
-                <td className="px-3 py-2">{t.summary}</td>
-                <td className="px-3 py-2 text-muted whitespace-nowrap">{t.status}</td>
-                <td className="px-3 py-2 text-right">
-                  <Button size="sm" onClick={() => onSend(`Execute ${t.key}`)}>
-                    Run this ticket
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
+        {data?.tickets.map((t) => (
+          <li key={t.key} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
+            <div className="min-w-0 flex-1 basis-48">
+              <p className="font-mono text-xs text-muted">{t.key}</p>
+              <p className="text-sm">{t.summary}</p>
+            </div>
+            <Button size="sm" onClick={() => onSend(`Execute ${t.key}`)}>
+              Run this ticket
+            </Button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  if (m.type === "error") {
+    return (
+      <div className="flex gap-3">
+        <AegisAvatar />
+        <div className="min-w-0 flex-1 rounded-2xl border border-rust/30 bg-rust/[0.06] p-4 text-[15px] leading-relaxed">
+          <Markdown>{m.content}</Markdown>
+        </div>
       </div>
     );
   }
 
+  const seconds = steps.length ? Math.max(0.1, (ts(m.created_at) - ts(since)) / 1000) : undefined;
   return (
-    <article className={cn("grid gap-1.5", m.type === "error" && "rounded-lg border border-rust/40 bg-rust/5 p-4")}>
-      <header className="flex items-baseline gap-2 text-xs">
-        <span className={cn("font-semibold", mine ? "text-fg" : m.type === "error" ? "text-rust" : "text-teal")}>
-          {mine ? "You" : "AEGIS"}
-        </span>
-      </header>
-      <div className={cn("text-[15px]", mine && "text-fg/90")}>
-        <Markdown>{m.content}</Markdown>
-      </div>
-      {steps.length > 0 && <Steps steps={steps} />}
-    </article>
+    <div className="grid gap-3">
+      {steps.length > 0 && (
+        <div className="pl-10">
+          <AIReasoning duration={seconds}>
+            <div className="grid gap-2">
+              {steps.map((s, i) => (
+                <AIToolCall key={i} name={STEP_LABEL[s.name] ?? s.name} summary={s.args || undefined} status="success" />
+              ))}
+            </div>
+          </AIReasoning>
+        </div>
+      )}
+      <AIMessage from="assistant" bubble={false} avatar={<AegisAvatar />} copyText={m.content}>
+        <div className="text-[15px] leading-relaxed">
+          <Markdown>{m.content}</Markdown>
+        </div>
+      </AIMessage>
+    </div>
   );
 }
 
 const STEP_LABEL: Record<string, string> = {
-  search_terraform_docs: "Searched docs",
-  fetch_terraform_docs: "Read docs",
-  write_tf_file: "Wrote",
-  read_tf_file: "Read",
+  search_terraform_docs: "Searched the docs",
+  fetch_terraform_docs: "Read the docs",
+  write_tf_file: "Wrote a file",
+  read_tf_file: "Read a file",
   list_workspace_files: "Listed files",
   start_terraform_plan: "Ran terraform plan",
   ask_user_form: "Asked you",
   fetch_jira_tickets: "Searched Jira",
-  get_jira_ticket: "Read ticket",
-  update_jira_ticket_status: "Updated ticket",
-  create_folder: "Created folder",
+  get_jira_ticket: "Read the ticket",
+  update_jira_ticket_status: "Updated the ticket",
+  create_folder: "Created a folder",
 };
-
-function Steps({ steps }: { steps: ToolStep[] }) {
-  return (
-    <details className="group text-sm">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-muted hover:text-fg">
-        <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden />
-        {steps.length} {steps.length === 1 ? "step" : "steps"}
-      </summary>
-      <ol className="mt-2 grid gap-1 border-l border-line pl-4">
-        {steps.map((s, i) => (
-          <li key={i} className="text-muted">
-            <span className="text-fg/80">{STEP_LABEL[s.name] ?? s.name}</span>
-            {s.args && <span className="ml-2 font-mono text-xs break-all">{s.args}</span>}
-          </li>
-        ))}
-      </ol>
-    </details>
-  );
-}

@@ -1,60 +1,56 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, SendHorizontal, Upload } from "lucide-react";
-import { request } from "../lib/api";
-import { useAuth } from "../lib/auth";
-import type { KbAnswer, KbCandidate, KbDocument, KbGap, KbThread, RunMessage } from "../lib/types";
-import { ago, cn, tryJson } from "../lib/format";
-import Markdown from "../components/Markdown";
-import { Button, Empty, ErrorNote, PageHeader } from "../components/ui";
+import { History, Plus, Upload } from "lucide-react";
+import AnimatedTabs from "@/components/smoothui/animated-tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { request } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import type { KbAnswer, KbCandidate, KbDocument, KbGap, KbThread, RunMessage } from "@/lib/types";
+import { ago, tryJson } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import Markdown from "@/components/Markdown";
+import AIMessage from "@/components/smoothui/ai-message";
+import AILoader from "@/components/smoothui/ai-loader";
+import AICitation from "@/components/smoothui/ai-citation";
+import AISources from "@/components/smoothui/ai-sources";
+import { Button, Empty, ErrorNote, Page, PageHeader, Panel, RowMenu, RowSkeleton } from "@/components/ui";
+import { AegisAvatar, Composer } from "./runs/Conversation";
 
 type View = "ask" | "documents" | "review";
 
 export default function Knowledge() {
   const { identity } = useAuth();
   const [view, setView] = useState<View>("ask");
-  const views: Array<[View, string]> = [
-    ["ask", "Ask"],
-    ["documents", "Documents"],
-    ...(identity?.role === "admin" ? ([["review", "Review queue"]] as Array<[View, string]>) : []),
+  const tabs = [
+    { id: "ask", label: "Ask" },
+    { id: "documents", label: "Documents" },
+    ...(identity?.role === "admin" ? [{ id: "review", label: "Review" }] : []),
   ];
   return (
-    <div className="flex h-full flex-col">
-      <div role="tablist" className="flex shrink-0 gap-1 border-b border-line px-4">
-        {views.map(([id, label]) => (
-          <button
-            key={id}
-            role="tab"
-            aria-selected={view === id}
-            onClick={() => setView(id)}
-            className={cn(
-              "relative h-11 px-3 text-sm",
-              view === id ? "text-fg after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-teal" : "text-muted hover:text-fg",
-            )}
-          >
-            {label}
-          </button>
-        ))}
+    <div className="mx-auto flex w-full max-w-5xl flex-col px-4 sm:px-6">
+      <div className="grid gap-5 pt-6 sm:pt-10">
+        <PageHeader title="Knowledge" description="Answers from your team's own runbooks and standards, with every source cited." />
+        <AnimatedTabs variant="segment" tabs={tabs} activeTab={view} onChange={(id) => setView(id as View)} className="w-full sm:w-fit" />
       </div>
-      <div className="min-h-0 flex-1">
-        {view === "ask" && <Ask />}
-        {view === "documents" && <Documents />}
-        {view === "review" && <Review />}
-      </div>
+      {view === "ask" && <Ask />}
+      {view === "documents" && <Documents />}
+      {view === "review" && <Review />}
     </div>
   );
 }
-
-// ── Ask ───────────────────────────────────────────────────────────────────────
 
 type KbSnapshot = { thread: KbThread; messages: RunMessage[]; is_running: boolean };
 
 function Ask() {
   const qc = useQueryClient();
   const [threadId, setThreadId] = useState<string | null>(null);
-  const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
-
   const threads = useQuery({
     queryKey: ["kb-threads"],
     queryFn: () => request<{ threads: KbThread[] }>("/agent-api/kb-chat/threads").then((r) => r.threads),
@@ -85,135 +81,108 @@ function Ask() {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [snap.data?.messages.length]);
 
-  const submit = () => {
-    const t = text.trim();
-    if (t) {
-      send.mutate(t);
-      setText("");
-    }
-  };
-
   return (
-    <div className="flex h-full min-h-0">
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-surface md:flex">
-        <div className="p-3">
-          <Button className="w-full" onClick={() => setThreadId(null)}>
-            <Plus className="size-4" aria-hidden /> New question
-          </Button>
+    <div className="flex min-h-[calc(100dvh-16rem)] flex-col gap-6 pt-6 pb-28 md:pb-10">
+      <div className="flex items-center justify-between gap-2">
+        <p className="truncate text-sm text-muted">{snap.data?.thread.title || "New question"}</p>
+        <div className="flex gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="ghost" disabled={!threads.data?.length}>
+                <History aria-hidden /> History
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-80 w-72 overflow-y-auto rounded-xl border-line bg-surface p-1">
+              <DropdownMenuLabel className="px-2.5 text-xs font-normal text-muted">Your questions</DropdownMenuLabel>
+              {threads.data?.map((t) => (
+                <DropdownMenuItem key={t.id} onSelect={() => setThreadId(t.id)} className="grid gap-0.5 rounded-lg px-2.5 py-2">
+                  <span className="line-clamp-1">{t.title || "Untitled"}</span>
+                  <span className="text-xs text-muted">{ago(t.updated_at)}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {threadId && (
+            <Button size="sm" variant="ghost" onClick={() => setThreadId(null)}>
+              <Plus aria-hidden /> New
+            </Button>
+          )}
         </div>
-        <ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {threads.data?.map((t) => (
-            <li key={t.id}>
-              <button
-                onClick={() => setThreadId(t.id)}
-                className={cn(
-                  "grid w-full gap-0.5 rounded-md px-3 py-2 text-left",
-                  t.id === threadId ? "bg-raised" : "hover:bg-raised/60",
-                )}
-              >
-                <span className="line-clamp-2 text-sm">{t.title || "Untitled"}</span>
-                <span className="text-xs text-muted">{ago(t.updated_at)}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
-          <div className="mx-auto grid max-w-3xl gap-5">
-            {!threadId && (
-              <div className="grid gap-2 py-6">
-                <h1 className="text-2xl font-semibold tracking-tight">Ask your knowledge base</h1>
-                <p className="text-muted">
-                  Answers come from the runbooks, standards and postmortems your team uploaded, with every source
-                  cited. If the documents don't cover it, AEGIS says so and asks before searching the web.
-                </p>
-              </div>
-            )}
-            {snap.data?.messages.map((m, i) => <KbEntry key={i} message={m} />)}
-            {snap.data?.is_running && <p className="text-sm text-muted">Searching the knowledge base…</p>}
-            <ErrorNote error={send.error} />
-            <div ref={endRef} />
+      </div>
+
+      <div className="grid flex-1 content-start gap-6">
+        {!threadId && (
+          <Empty title="Ask anything your documents cover">
+            If they don't cover it, AEGIS says so, and asks before searching the web.
+          </Empty>
+        )}
+        {snap.data?.messages.map((m, i) => <KbEntry key={i} message={m} />)}
+        {snap.data?.is_running && (
+          <div className="flex items-center gap-3" aria-live="polite">
+            <AegisAvatar />
+            <AILoader variant="dots" label="Searching the knowledge base" showElapsed />
           </div>
-        </div>
-        <form
-          className="mx-auto mb-5 flex w-full max-w-3xl items-end gap-2 rounded-lg border border-line bg-surface p-2 focus-within:border-teal"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submit();
-          }}
-        >
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            rows={1}
-            placeholder="What are our tagging standards for production resources?"
-            className="max-h-40 min-h-9 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm focus:outline-none"
-            aria-label="Question"
-          />
-          <Button type="submit" variant="primary" size="sm" busy={send.isPending} disabled={!text.trim()} aria-label="Ask">
-            <SendHorizontal className="size-4" aria-hidden />
-          </Button>
-        </form>
+        )}
+        <ErrorNote error={send.error} />
+        <div ref={endRef} />
+      </div>
+
+      <div className="sticky bottom-24 md:bottom-6">
+        <Composer working={!!snap.data?.is_running || send.isPending} onSend={(t) => send.mutate(t)} placeholder="Ask about your runbooks and standards" />
       </div>
     </div>
   );
 }
 
+const host = (u: string) => {
+  try {
+    return new URL(u).hostname.replace(/^www\./, "");
+  } catch {
+    return u;
+  }
+};
+
 function KbEntry({ message: m }: { message: RunMessage }) {
-  if (m.type === "kb_answer") {
-    const a = tryJson<KbAnswer>(m.content);
-    if (!a) return null;
+  if (m.role === "user") {
     return (
-      <article className="grid gap-3 rounded-lg border border-line bg-surface p-4">
-        <Markdown>{a.answer}</Markdown>
-        {(a.doc_citations.length > 0 || a.web_citations.length > 0) && (
-          <div className="grid gap-2 border-t border-line pt-3 text-sm">
-            {a.doc_citations.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                <span className="text-muted">From your documents:</span>
-                {a.doc_citations.map((c) => (
-                  <span key={c} className="rounded border border-line px-1.5 text-xs">
-                    {c}
-                  </span>
-                ))}
-              </div>
-            )}
-            {a.web_citations.length > 0 && (
-              <div className="flex flex-wrap gap-x-3 gap-y-1">
-                <span className="text-muted">From the web (not yet approved as knowledge):</span>
-                {a.web_citations.map((u) => (
-                  <a key={u} href={u} target="_blank" rel="noreferrer" className="break-all text-teal underline">
-                    {new URL(u).hostname}
-                  </a>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        <p className={cn("text-xs", a.confidence === "low" ? "text-amber" : "text-muted")}>
-          Confidence: {a.confidence}
-          {a.confidence_reason ? `. ${a.confidence_reason}` : ""}
-        </p>
-      </article>
+      <AIMessage from="user">
+        <Markdown>{m.content}</Markdown>
+      </AIMessage>
     );
   }
-  const mine = m.role === "user";
+  const a = m.type === "kb_answer" ? tryJson<KbAnswer>(m.content) : null;
+  const text = a ? a.answer : m.content;
   return (
-    <article className="grid gap-1">
-      <span className={cn("text-xs font-semibold", mine ? "text-fg" : "text-teal")}>{mine ? "You" : "AEGIS"}</span>
-      <Markdown>{m.content}</Markdown>
-    </article>
+    <AIMessage from="assistant" bubble={false} avatar={<AegisAvatar />} copyText={text}>
+      <div className="grid gap-3">
+        <div className="text-[15px] leading-relaxed">
+          <Markdown>{text}</Markdown>
+        </div>
+        {a && (a.doc_citations.length > 0 || a.web_citations.length > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {a.doc_citations.map((c) => (
+              <span key={c} className="rounded-full border border-line px-2.5 py-0.5 text-xs text-muted">
+                {c}
+              </span>
+            ))}
+            {a.web_citations.map((u, i) => (
+              <AICitation key={u} label={i + 1} title={host(u)} url={u} description="From the web, not your documents" />
+            ))}
+          </div>
+        )}
+        {a && a.web_citations.length > 0 && (
+          <AISources label="Web sources" sources={a.web_citations.map((u) => ({ id: u, title: host(u), url: u }))} />
+        )}
+        {a && (
+          <p className={cn("text-xs", a.confidence === "low" ? "text-amber" : "text-muted")}>
+            Confidence {a.confidence}
+            {a.confidence_reason ? `: ${a.confidence_reason}` : ""}
+          </p>
+        )}
+      </div>
+    </AIMessage>
   );
 }
-
-// ── Documents ─────────────────────────────────────────────────────────────────
 
 function Documents() {
   const qc = useQueryClient();
@@ -236,101 +205,81 @@ function Documents() {
   });
 
   return (
-    <div className="mx-auto grid max-w-4xl gap-6 overflow-y-auto px-6 py-8">
-      <PageHeader
-        title="Documents"
-        description="Markdown, text, PDF, Word, Excel and CSV, up to 10 MB each. Uploads are chunked and indexed for search."
-        actions={
-          <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md bg-teal px-4 text-sm font-medium text-on-accent">
-            <Upload className="size-4" aria-hidden />
-            {upload.isPending ? "Uploading…" : "Upload a document"}
-            <input
-              type="file"
-              className="sr-only"
-              accept=".md,.txt,.pdf,.docx,.xlsx,.csv"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) upload.mutate(f);
-                e.target.value = "";
-              }}
-            />
-          </label>
-        }
-      />
+    <Page className="max-w-none px-0 sm:px-0">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted">Markdown, text, PDF, Word, Excel or CSV, up to 10 MB each.</p>
+        <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-lg bg-teal px-4 text-sm font-medium text-on-accent">
+          <Upload className="size-4" aria-hidden />
+          {upload.isPending ? "Uploading" : "Upload"}
+          <input
+            type="file"
+            className="sr-only"
+            accept=".md,.txt,.pdf,.docx,.xlsx,.csv"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) upload.mutate(f);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      </div>
       <ErrorNote error={upload.error || remove.error} />
-      {docs.data?.length === 0 ? (
-        <Empty title="No documents yet">Upload your team's runbooks and standards so AEGIS can answer from them.</Empty>
+      {docs.isLoading ? (
+        <RowSkeleton />
+      ) : !docs.data?.length ? (
+        <Empty title="No documents yet">Upload runbooks and standards so AEGIS can answer from them.</Empty>
       ) : (
-        <ul className="divide-y divide-line rounded-lg border border-line">
-          {docs.data?.map((d) => (
-            <li key={d.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3">
-              <div className="w-full min-w-0 sm:w-auto sm:flex-1">
-                <p className="font-medium">{d.title || d.filename}</p>
-                <p className="text-xs text-muted">
-                  {d.filename}, uploaded {ago(d.uploaded_at)}
-                </p>
-              </div>
-              <span className={cn("text-sm", d.status === "ready" ? "text-muted" : d.status === "failed" ? "text-rust" : "text-amber")}>
-                {d.status === "ready" ? `${d.chunk_count} passages` : d.status === "pending_approval" ? "Awaiting approval" : d.status}
-              </span>
-              <Button size="sm" variant="ghost" onClick={() => window.confirm(`Delete ${d.filename}?`) && remove.mutate(d.id)}>
-                Delete
-              </Button>
-            </li>
-          ))}
-        </ul>
+        <Panel>
+          <ul className="divide-y divide-line">
+            {docs.data.map((d) => (
+              <li key={d.id} className="flex items-center gap-4 px-5 py-4">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate">{d.title || d.filename}</p>
+                  <p className={cn("mt-0.5 text-sm", d.status === "failed" ? "text-rust" : d.status === "ready" ? "text-muted" : "text-amber")}>
+                    {d.status === "ready" ? `${d.chunk_count} passages` : d.status === "pending_approval" ? "Awaiting approval" : d.status}
+                    <span className="px-1.5 text-line">/</span>
+                    <span className="text-muted">{ago(d.uploaded_at)}</span>
+                  </p>
+                </div>
+                <RowMenu items={[{ label: "Delete", danger: true, onSelect: () => window.confirm(`Delete ${d.filename}?`) && remove.mutate(d.id) }]} />
+              </li>
+            ))}
+          </ul>
+        </Panel>
       )}
-    </div>
+    </Page>
   );
 }
-
-// ── Review (admin) ────────────────────────────────────────────────────────────
 
 function Review() {
   const qc = useQueryClient();
   const kb = (p: string) => `/agent-api/knowledge-base${p}`;
-  const candidates = useQuery({
-    queryKey: ["kb-candidates"],
-    queryFn: () => request<{ candidates: KbCandidate[] }>(kb("/candidates")).then((r) => r.candidates),
-  });
-  const docs = useQuery({
-    queryKey: ["kb-docs"],
-    queryFn: () => request<{ documents: KbDocument[] }>(kb("/documents")).then((r) => r.documents),
-  });
-  const gaps = useQuery({
-    queryKey: ["kb-gaps"],
-    queryFn: () => request<{ gaps: KbGap[] }>(kb("/gaps")).then((r) => r.gaps.filter((g) => g.status === "open")),
-  });
+  const candidates = useQuery({ queryKey: ["kb-candidates"], queryFn: () => request<{ candidates: KbCandidate[] }>(kb("/candidates")).then((r) => r.candidates) });
+  const docs = useQuery({ queryKey: ["kb-docs"], queryFn: () => request<{ documents: KbDocument[] }>(kb("/documents")).then((r) => r.documents) });
+  const gaps = useQuery({ queryKey: ["kb-gaps"], queryFn: () => request<{ gaps: KbGap[] }>(kb("/gaps")).then((r) => r.gaps.filter((g) => g.status === "open")) });
   const act = useMutation({
     mutationFn: ({ path, body }: { path: string; body?: unknown }) => request(kb(path), { method: "POST", body }),
     onSuccess: () => ["kb-candidates", "kb-docs", "kb-gaps"].forEach((k) => qc.invalidateQueries({ queryKey: [k] })),
   });
   const pendingDocs = docs.data?.filter((d) => d.status === "pending_approval") ?? [];
+  const nothing = !candidates.data?.length && !pendingDocs.length && !gaps.data?.length;
 
   return (
-    <div className="mx-auto grid max-w-4xl gap-10 overflow-y-auto px-6 py-8">
-      <PageHeader
-        title="Review queue"
-        description="Nothing becomes knowledge on its own. Web findings and generated write-ups wait here until an admin approves them."
-      />
+    <Page className="max-w-none px-0 sm:px-0">
+      <p className="text-sm text-muted">Nothing becomes knowledge on its own. Approve what should.</p>
       <ErrorNote error={act.error} />
+      {nothing && <Empty title="Nothing to review" />}
 
-      <section className="grid gap-3">
-        <h2 className="font-semibold">Answers researched on the web</h2>
-        {!candidates.data?.length ? (
-          <Empty title="Nothing to review" />
-        ) : (
-          candidates.data.map((c) => (
-            <article key={c.id} className="grid gap-3 rounded-lg border border-line p-4">
+      {!!candidates.data?.length && (
+        <section className="grid gap-3">
+          <h2 className="text-sm font-medium text-muted">Researched answers</h2>
+          {candidates.data.map((c) => (
+            <Panel key={c.id} className="grid gap-4 p-5">
               <p className="font-medium">{c.question}</p>
-              <div className="max-h-60 overflow-y-auto text-sm">
+              <div className="max-h-56 overflow-y-auto text-sm text-muted">
                 <Markdown>{c.consolidated_answer}</Markdown>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="mr-auto text-xs text-muted">
-                  {c.created_by ? `Asked by ${c.created_by}, ` : ""}
-                  {ago(c.created_at)}
-                </span>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -342,58 +291,60 @@ function Review() {
                   Reject
                 </Button>
                 <Button size="sm" variant="primary" onClick={() => act.mutate({ path: `/candidates/${c.id}/approve` })}>
-                  Add to knowledge base
+                  Add to knowledge
                 </Button>
               </div>
-            </article>
-          ))
-        )}
-      </section>
-
-      {pendingDocs.length > 0 && (
-        <section className="grid gap-3">
-          <h2 className="font-semibold">Documents awaiting approval</h2>
-          <ul className="divide-y divide-line rounded-lg border border-line">
-            {pendingDocs.map((d) => (
-              <li key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <span className="min-w-0 flex-1">{d.title || d.filename}</span>
-                <Button size="sm" variant="ghost" onClick={() => act.mutate({ path: `/documents/${d.id}/reject-pending` })}>
-                  Reject
-                </Button>
-                <Button size="sm" variant="primary" onClick={() => act.mutate({ path: `/documents/${d.id}/approve` })}>
-                  Approve
-                </Button>
-              </li>
-            ))}
-          </ul>
+            </Panel>
+          ))}
         </section>
       )}
 
-      <section className="grid gap-3">
-        <h2 className="font-semibold">Questions the knowledge base couldn't answer</h2>
-        {!gaps.data?.length ? (
-          <Empty title="No open gaps" />
-        ) : (
-          <ul className="divide-y divide-line rounded-lg border border-line">
-            {gaps.data.map((g) => (
-              <li key={g.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <div className="w-full min-w-0 sm:w-auto sm:flex-1">
-                  <p>{g.question}</p>
-                  <p className="text-xs text-muted">
-                    Asked {g.hit_count} {g.hit_count === 1 ? "time" : "times"}, last {ago(g.last_seen)}
-                  </p>
-                </div>
-                <Button size="sm" variant="ghost" onClick={() => act.mutate({ path: `/gaps/${g.id}/reject` })}>
-                  Dismiss
-                </Button>
-                <Button size="sm" onClick={() => act.mutate({ path: `/gaps/${g.id}/research` })}>
-                  Research it
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
+      {pendingDocs.length > 0 && (
+        <section className="grid gap-3">
+          <h2 className="text-sm font-medium text-muted">Documents awaiting approval</h2>
+          <Panel>
+            <ul className="divide-y divide-line">
+              {pendingDocs.map((d) => (
+                <li key={d.id} className="flex items-center gap-4 px-5 py-4">
+                  <span className="min-w-0 flex-1 truncate">{d.title || d.filename}</span>
+                  <RowMenu
+                    items={[
+                      { label: "Approve", onSelect: () => act.mutate({ path: `/documents/${d.id}/approve` }) },
+                      { label: "Reject", danger: true, onSelect: () => act.mutate({ path: `/documents/${d.id}/reject-pending` }) },
+                    ]}
+                  />
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        </section>
+      )}
+
+      {!!gaps.data?.length && (
+        <section className="grid gap-3">
+          <h2 className="text-sm font-medium text-muted">Unanswered questions</h2>
+          <Panel>
+            <ul className="divide-y divide-line">
+              {gaps.data.map((g) => (
+                <li key={g.id} className="flex items-center gap-4 px-5 py-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2">{g.question}</p>
+                    <p className="mt-0.5 text-sm text-muted">
+                      Asked {g.hit_count} {g.hit_count === 1 ? "time" : "times"}
+                    </p>
+                  </div>
+                  <RowMenu
+                    items={[
+                      { label: "Research it", onSelect: () => act.mutate({ path: `/gaps/${g.id}/research` }) },
+                      { label: "Dismiss", onSelect: () => act.mutate({ path: `/gaps/${g.id}/reject` }) },
+                    ]}
+                  />
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        </section>
+      )}
+    </Page>
   );
 }

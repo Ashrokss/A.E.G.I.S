@@ -15,7 +15,7 @@ export default function Callback() {
     else if (code && state) completeSignIn(code, state).catch(setError);
   }, [params, completeSignIn]);
 
-  if (identity) return <Navigate to="/runs" replace />;
+  if (identity) return <Navigate to="/home" replace />;
   return (
     <div className="grid h-full place-items-center p-8">
       {error ? (

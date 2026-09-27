@@ -1,74 +1,70 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { request } from "../lib/api";
-import type { Identity, Role } from "../lib/types";
-import { ago } from "../lib/format";
-import { Button, Dialog, ErrorNote, Field, PageHeader, inputClass } from "../components/ui";
+import { Plus } from "lucide-react";
+import { request } from "@/lib/api";
+import type { Identity, Role } from "@/lib/types";
+import { ago } from "@/lib/format";
+import { Button, Dialog, ErrorNote, Field, Page, PageHeader, Panel, RowMenu, RowSkeleton, inputClass } from "@/components/ui";
 
 type AppUser = Identity & { cognitoSub: string };
 
 export default function Admin() {
   const qc = useQueryClient();
   const [inviting, setInviting] = useState(false);
-  const users = useQuery({
-    queryKey: ["users"],
-    queryFn: () => request<{ users: AppUser[] }>("/api/users").then((r) => r.users),
-  });
+  const users = useQuery({ queryKey: ["users"], queryFn: () => request<{ users: AppUser[] }>("/api/users").then((r) => r.users) });
   const promote = useMutation({
     mutationFn: (u: AppUser) => request(`/api/users/${encodeURIComponent(u.cognitoSub)}`, { method: "PATCH", body: { role: "admin" } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
   });
 
   return (
-    <div className="mx-auto grid max-w-4xl gap-8 px-6 py-8">
+    <Page>
       <PageHeader
         title="People"
-        description="Everyone who can sign in to AEGIS. Admins also manage people and decide what enters the knowledge base."
+        description="Everyone who can sign in. Admins also manage people and approve what enters the knowledge base."
         actions={
           <Button variant="primary" onClick={() => setInviting(true)}>
-            Invite someone
+            <Plus aria-hidden /> Invite
           </Button>
         }
       />
       <ErrorNote error={users.error || promote.error} />
-      <div className="overflow-x-auto rounded-lg border border-line">
-        <table className="w-full text-sm">
-          <thead className="text-left text-muted">
-            <tr className="border-b border-line">
-              <th className="px-4 py-2 font-medium">Email</th>
-              <th className="px-4 py-2 font-medium">Role</th>
-              <th className="px-4 py-2 font-medium">Last sign-in</th>
-              <th className="px-4 py-2" />
-            </tr>
-          </thead>
-          <tbody>
+      {users.isLoading ? (
+        <RowSkeleton />
+      ) : (
+        <Panel>
+          <ul className="divide-y divide-line">
             {users.data?.map((u) => (
-              <tr key={u.id} className="border-b border-line last:border-0">
-                <td className="px-4 py-2.5">
-                  {u.email}
-                  {!u.enabled && <span className="ml-2 text-xs text-rust">disabled</span>}
-                </td>
-                <td className="px-4 py-2.5">{u.role === "admin" ? "Admin" : "Member"}</td>
-                <td className="px-4 py-2.5 text-muted">{u.lastLogin ? ago(u.lastLogin) : "Never"}</td>
-                <td className="px-4 py-2.5 text-right">
-                  {u.role === "user" && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      busy={promote.isPending && promote.variables?.id === u.id}
-                      onClick={() => window.confirm(`Make ${u.email} an admin? This can't be undone.`) && promote.mutate(u)}
-                    >
-                      Make admin
-                    </Button>
-                  )}
-                </td>
-              </tr>
+              <li key={u.id} className="flex items-center gap-4 px-5 py-4">
+                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-raised text-sm font-semibold">
+                  {u.email.slice(0, 1).toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate">{u.email}</p>
+                  <p className="mt-0.5 text-sm text-muted">
+                    {u.role === "admin" ? "Admin" : "Member"}
+                    <span className="px-1.5 text-line">/</span>
+                    {u.lastLogin ? `Signed in ${ago(u.lastLogin)}` : "Never signed in"}
+                    {!u.enabled && <span className="text-rust"> / Disabled</span>}
+                  </p>
+                </div>
+                {u.role === "user" && (
+                  <RowMenu
+                    items={[
+                      {
+                        label: "Make admin",
+                        onSelect: () => window.confirm(`Make ${u.email} an admin? This can't be undone.`) && promote.mutate(u),
+                      },
+                    ]}
+                  />
+                )}
+              </li>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </ul>
+        </Panel>
+      )}
       <InviteDialog open={inviting} onClose={() => setInviting(false)} />
-    </div>
+    </Page>
   );
 }
 
@@ -87,20 +83,18 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
     onClose();
   };
   return (
-    <Dialog open={open} onClose={close} title="Invite someone">
+    <Dialog open={open} onClose={close} title={invite.data ? "Invitation ready" : "Invite someone"}>
       {invite.data ? (
-        <div className="grid gap-4">
-          <p>{invite.data.user.email} can now sign in.</p>
+        <div className="grid gap-5">
+          <p className="text-muted">{invite.data.user.email} can now sign in.</p>
           {invite.data.temporaryPassword && (
-            <div className="rounded-lg border border-amber/50 bg-amber/5 p-4 text-sm">
-              <p className="font-medium">Temporary password</p>
-              <p className="mt-1 font-mono text-base select-all">{invite.data.temporaryPassword}</p>
-              <p className="mt-2 text-muted">
-                Shown once. Send it to them privately; they choose a new one at first sign-in.
-              </p>
+            <div className="grid gap-2 rounded-xl border border-amber/35 bg-amber/[0.06] p-4">
+              <p className="text-sm font-medium">Temporary password</p>
+              <p className="font-mono text-base break-all select-all">{invite.data.temporaryPassword}</p>
+              <p className="text-sm text-muted">Shown once. Send it privately; they choose a new one at first sign-in.</p>
             </div>
           )}
-          <Button variant="primary" className="w-fit" onClick={close}>
+          <Button variant="primary" className="w-full sm:w-fit" onClick={close}>
             Done
           </Button>
         </div>
@@ -117,17 +111,17 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           </Field>
           <Field label="Role">
             <select value={role} onChange={(e) => setRole(e.target.value as Role)} className={inputClass}>
-              <option value="user">Member: runs, accounts, integrations, knowledge</option>
-              <option value="admin">Admin: also people and knowledge approvals</option>
+              <option value="user">Member</option>
+              <option value="admin">Admin</option>
             </select>
           </Field>
           <ErrorNote error={invite.error} />
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button type="button" variant="ghost" onClick={close}>
               Cancel
             </Button>
             <Button type="submit" variant="primary" busy={invite.isPending}>
-              Invite
+              Send invite
             </Button>
           </div>
         </form>

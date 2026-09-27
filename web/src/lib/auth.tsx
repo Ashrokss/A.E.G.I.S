@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIdentity(null);
     fetch("/auth/aws/logout", { method: "POST" }).catch(() => {});
     // End the Cognito session too, or the next sign-in is silent.
-    if (hadSession && !authConfigError) window.location.href = cognitoLogoutUrl();
+    if (hadSession && !authConfigError && import.meta.env.VITE_DEMO !== "1") window.location.href = cognitoLogoutUrl();
   }, [store]);
 
   useEffect(() => {
@@ -115,6 +115,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [tokens, store, logout]);
 
   const login = useCallback(async () => {
+    // Demo mode (npm run demo): no Cognito, the in-memory mock answers /api/auth/me.
+    // VITE_DEMO is inlined at build time, so a normal build drops this branch entirely.
+    if (import.meta.env.VITE_DEMO === "1") {
+      store({ accessToken: "demo", expiresAt: Date.now() + 12 * 3_600_000 });
+      const me = await request<{ user: Identity }>("/api/auth/me");
+      setIdentity(me.user);
+      return;
+    }
     if (authConfigError) return setError(authConfigError);
     sessionStorage.removeItem(REFUSAL_KEY);
     const state = randomString();
@@ -131,7 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       code_challenge_method: "S256",
     }).toString();
     window.location.href = url.toString();
-  }, []);
+  }, [store]);
 
   const completeSignIn = useCallback(
     async (code: string, state: string) => {

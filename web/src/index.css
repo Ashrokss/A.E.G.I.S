@@ -1,9 +1,23 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-/* Tokens. Colour is semantic: teal = moving / create, amber = needs you /
-   update, red = destroy. Nothing else is coloured. */
+/* `dark:` follows the AEGIS rule: the OS setting, unless data-theme pins one. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
+/* One neutral palette and ONE accent (teal). Amber and rust appear only where
+   they mean something: a plan's "update" and "destroy". */
 @theme {
-  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --color-bg: var(--bg);
@@ -16,87 +30,232 @@
   --color-amber: var(--amber);
   --color-rust: var(--rust);
   --color-on-accent: var(--on-accent);
+
+  /* shadcn/ui tokens on the same palette. */
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--teal);
+  --color-primary-foreground: var(--on-accent);
+  --color-secondary: var(--raised);
+  --color-secondary-foreground: var(--fg);
+  --color-accent: var(--raised);
+  --color-accent-foreground: var(--fg);
+  --color-muted-foreground: var(--muted);
+  --color-destructive: var(--rust);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--teal);
+  --radius: 0.75rem;
 }
 
+@theme inline {
+  /* SmoothUI's brand hue is AEGIS teal. */
+  --color-brand: var(--teal);
+  --color-brand-light: color-mix(in oklab, var(--teal) 75%, white);
+  --color-brand-lighter: color-mix(in oklab, var(--teal) 50%, white);
+  --color-brand-secondary: color-mix(in oklab, var(--teal) 80%, black);
+  --color-amber-fg: var(--amber-fg);
+  --color-amber-hover: var(--amber-hover);
+  --color-blue: var(--blue);
+  --color-blue-fg: var(--blue-fg);
+  --color-blue-hover: var(--blue-hover);
+  --color-green: var(--green);
+  --color-green-fg: var(--green-fg);
+  --color-green-hover: var(--green-hover);
+  --color-smooth-50: var(--smooth-50);
+  --color-smooth-100: var(--smooth-100);
+  --color-smooth-200: var(--smooth-200);
+  --color-smooth-300: var(--smooth-300);
+  --color-smooth-400: var(--smooth-400);
+  --color-smooth-500: var(--smooth-500);
+  --color-smooth-600: var(--smooth-600);
+  --color-smooth-700: var(--smooth-700);
+  --color-smooth-800: var(--smooth-800);
+  --color-smooth-900: var(--smooth-900);
+  --color-smooth-950: var(--smooth-950);
+  --color-smooth-1000: var(--smooth-1000);
+}
+
+/* ── Dark (default) ─────────────────────────────────────────────────────── */
 :root {
-  --bg: #16191e;
-  --surface: #1e2228;
-  --raised: #272c33;
-  --line: #353b44;
-  --fg: #e4e7eb;
-  --muted: #98a1ac;
-  --teal: #39bfae;
-  --amber: #f0a63a;
-  --rust: #e8604f;
-  --on-accent: #0f1a19;
   color-scheme: dark;
+  --bg: #131313;
+  --surface: #1a1a1a;
+  --raised: #242424;
+  --line: #2a2a2a;
+  --fg: #ededed;
+  --muted: #a1a1a1;
+  --teal: #3cc3b0;
+  --amber: #f0a63a;
+  --rust: #ef6b5a;
+  --on-accent: #06201c;
+
+  --amber-fg: oklch(0.2 0 0);
+  --amber-hover: oklch(0.85 0.14 72);
+  --blue: oklch(0.66 0.18 256);
+  --blue-fg: #fff;
+  --blue-hover: oklch(0.72 0.16 256);
+  --green: oklch(0.73 0.16 152);
+  --green-fg: oklch(0.2 0 0);
+  --green-hover: oklch(0.79 0.15 152);
+  --smooth-50: oklch(0.2 0 0);
+  --smooth-100: oklch(0.235 0 0);
+  --smooth-200: oklch(0.275 0 0);
+  --smooth-300: oklch(0.315 0 0);
+  --smooth-400: oklch(0.36 0 0);
+  --smooth-500: oklch(0.41 0 0);
+  --smooth-600: oklch(0.47 0 0);
+  --smooth-700: oklch(0.55 0 0);
+  --smooth-800: oklch(0.66 0 0);
+  --smooth-900: oklch(0.74 0 0);
+  --smooth-950: oklch(0.85 0 0);
+  --smooth-1000: oklch(0.96 0 0);
+}
+
+/* ── Light ──────────────────────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --raised: #f2f2f2;
+  --line: #e6e6e6;
+  --fg: #161616;
+  --muted: #6b6b6b;
+  --teal: #0e8b7d;
+  --amber: #b06a08;
+  --rust: #cc3f2e;
+  --on-accent: #ffffff;
+  --smooth-50: oklch(0.99 0 0);
+  --smooth-100: oklch(0.972 0 0);
+  --smooth-200: oklch(0.945 0 0);
+  --smooth-300: oklch(0.91 0 0);
+  --smooth-400: oklch(0.865 0 0);
+  --smooth-500: oklch(0.81 0 0);
+  --smooth-600: oklch(0.74 0 0);
+  --smooth-700: oklch(0.66 0 0);
+  --smooth-800: oklch(0.56 0 0);
+  --smooth-900: oklch(0.47 0 0);
+  --smooth-950: oklch(0.36 0 0);
+  --smooth-1000: oklch(0.22 0 0);
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #f2f4f6;
-    --surface: #ffffff;
-    --raised: #e9edf0;
-    --line: #d3d9df;
-    --fg: #1c2127;
-    --muted: #5c6670;
-    --teal: #13857a;
-    --amber: #a8650a;
-    --rust: #c23f2f;
-    --on-accent: #ffffff;
     color-scheme: light;
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --raised: #f2f2f2;
+    --line: #e6e6e6;
+    --fg: #161616;
+    --muted: #6b6b6b;
+    --teal: #0e8b7d;
+    --amber: #b06a08;
+    --rust: #cc3f2e;
+    --on-accent: #ffffff;
+    --smooth-50: oklch(0.99 0 0);
+    --smooth-100: oklch(0.972 0 0);
+    --smooth-200: oklch(0.945 0 0);
+    --smooth-300: oklch(0.91 0 0);
+    --smooth-400: oklch(0.865 0 0);
+    --smooth-500: oklch(0.81 0 0);
+    --smooth-600: oklch(0.74 0 0);
+    --smooth-700: oklch(0.66 0 0);
+    --smooth-800: oklch(0.56 0 0);
+    --smooth-900: oklch(0.47 0 0);
+    --smooth-950: oklch(0.36 0 0);
+    --smooth-1000: oklch(0.22 0 0);
   }
 }
 
-:root[data-theme="light"] {
-  --bg: #f2f4f6;
-  --surface: #ffffff;
-  --raised: #e9edf0;
-  --line: #d3d9df;
-  --fg: #1c2127;
-  --muted: #5c6670;
-  --teal: #13857a;
-  --amber: #a8650a;
-  --rust: #c23f2f;
-  --on-accent: #ffffff;
-  color-scheme: light;
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--teal) 30%, transparent);
+  }
 }
 
-html,
-body,
-#root {
-  height: 100%;
+/* Native <select> popups are drawn by the browser; without explicit colours
+   they can open on white with the theme's light text. */
+select {
+  color-scheme: inherit;
 }
-
-body {
-  background: var(--bg);
+option,
+optgroup {
+  background-color: var(--surface);
   color: var(--fg);
-  font-family: var(--font-sans);
-  font-size: 15px;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
+}
+option:checked {
+  background-color: var(--raised);
 }
 
-:focus-visible {
-  outline: 2px solid var(--teal);
-  outline-offset: 2px;
-  border-radius: 4px;
+/* Scrollbars: thin, rounded, theme-coloured, no arrow buttons. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklab, var(--muted) 45%, transparent);
+}
+::-webkit-scrollbar-button,
+::-webkit-scrollbar-corner {
+  display: none;
 }
 
-::selection {
-  background: color-mix(in srgb, var(--teal) 35%, transparent);
-}
-
-/* Horizontal strips (nav, phase rail) scroll without a visible bar. */
+/* Horizontal strips scroll without a visible bar. */
 .no-scrollbar {
   scrollbar-width: none;
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
-}
-
-dialog::backdrop {
-  background: rgb(0 0 0 / 0.55);
 }
 
 /* Agent markdown */
@@ -108,7 +267,7 @@ dialog::backdrop {
 .prose-aegis ol,
 .prose-aegis pre,
 .prose-aegis table {
-  margin: 0 0 0.6em;
+  margin: 0 0 0.7em;
 }
 .prose-aegis > :last-child {
   margin-bottom: 0;
@@ -121,23 +280,26 @@ dialog::backdrop {
   list-style: decimal;
   padding-left: 1.2em;
 }
+.prose-aegis li + li {
+  margin-top: 0.2em;
+}
 .prose-aegis a {
   color: var(--teal);
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-underline-offset: 3px;
 }
 .prose-aegis code {
   font-family: var(--font-mono);
-  font-size: 0.86em;
+  font-size: 0.85em;
   background: var(--raised);
-  padding: 0.1em 0.35em;
-  border-radius: 4px;
+  padding: 0.12em 0.4em;
+  border-radius: 6px;
 }
 .prose-aegis pre {
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 0.75em;
+  border-radius: 12px;
+  padding: 0.9em 1em;
   overflow-x: auto;
 }
 .prose-aegis pre code {
@@ -148,7 +310,7 @@ dialog::backdrop {
 .prose-aegis h2,
 .prose-aegis h3 {
   font-weight: 600;
-  margin: 0.8em 0 0.3em;
+  margin: 0.9em 0 0.35em;
 }
 .prose-aegis table {
   border-collapse: collapse;
@@ -157,7 +319,7 @@ dialog::backdrop {
 .prose-aegis th,
 .prose-aegis td {
   border: 1px solid var(--line);
-  padding: 0.3em 0.6em;
+  padding: 0.35em 0.7em;
   text-align: left;
 }
 
