@@ -10,6 +10,7 @@ export const STATUS: Record<RunStatus, { label: string; tone: Tone; working: boo
   AWAITING_APPROVAL: { label: "Plan ready for review", tone: "amber", working: false },
   APPLYING: { label: "Applying", tone: "teal", working: true },
   REPAIRING: { label: "Fixing the configuration", tone: "teal", working: true },
+  CHECKING_DRIFT: { label: "Checking for drift", tone: "teal", working: true },
   COMPLETED: { label: "Applied", tone: "muted", working: false },
   FAILED: { label: "Failed", tone: "rust", working: false },
 };

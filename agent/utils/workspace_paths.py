@@ -17,7 +17,13 @@ _SEGMENT_RE = re.compile(r"^\.?[A-Za-z0-9][A-Za-z0-9._-]*$")
 _DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 EXCLUDED_DIR_NAMES = {".terraform", ".git", "__pycache__"}
+# Written by the platform before `terraform init` (tools/terraform.py): the S3
+# backend in the target account. The model may not write it, and it is never
+# listed, downloaded or pushed — a repository keeps its own backend.
+BACKEND_FILE_NAME = "_aegis_backend.tf"
+
 EXCLUDED_FILE_NAMES = {
+    BACKEND_FILE_NAME,
     ".terraform.lock.hcl",
     "terraform.tfstate",
     "terraform.tfstate.backup",
@@ -26,6 +32,7 @@ EXCLUDED_FILE_NAMES = {
     # from every previous exclusion list and was being committed to customer
     # repositories.
     "tfplan",
+    "driftplan",  # the refresh-only plan behind a drift check; same reason
 }
 EXCLUDED_FILE_SUFFIXES = (".tfstate", ".tfstate.backup", ".lock.info")
 
@@ -73,6 +80,9 @@ def safe_join(workspace: str, rel_path: str, *, for_write: bool) -> str:
             raise WorkspacePathError(f"'{seg}' is not a valid file or directory name")
         if seg in EXCLUDED_DIR_NAMES:
             raise WorkspacePathError(f"'{seg}' is a reserved name")
+
+    if for_write and segments[-1].lower() == BACKEND_FILE_NAME:
+        raise WorkspacePathError(f"'{BACKEND_FILE_NAME}' is managed by the platform")
 
     if for_write and not norm.lower().endswith(WRITE_EXT_ALLOWLIST):
         raise WorkspacePathError(

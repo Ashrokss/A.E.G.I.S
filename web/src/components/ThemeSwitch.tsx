@@ -12,7 +12,7 @@ const OPTIONS: Array<{ value: ThemeChoice; label: string; icon: LucideIcon }> = 
 export default function ThemeSwitch({ className }: { className?: string }) {
   const { theme, setTheme } = useTheme();
   return (
-    <div role="radiogroup" aria-label="Theme" className={cn("inline-flex h-9 items-center gap-0.5 rounded-full border border-line bg-surface/70 p-0.5", className)}>
+    <div role="radiogroup" aria-label="Theme" className={cn("glass glass-flat inline-flex h-9 items-center gap-0.5 rounded-full p-0.5", className)}>
       {OPTIONS.map(({ value, label, icon: Icon }) => (
         <button
           key={value}

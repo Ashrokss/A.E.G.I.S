@@ -94,6 +94,7 @@ module "cognito" {
   app_url             = module.cloudfront.app_url
   extra_callback_urls = var.cognito_extra_callback_urls
   extra_logout_urls   = var.cognito_extra_logout_urls
+  self_signup_enabled = var.self_signup_enabled
 }
 
 module "cloudwatch" {
@@ -166,6 +167,7 @@ module "ecs" {
   db_password_value_from = module.rds.password_value_from
   db_master_secret_arn   = module.rds.master_secret_arn
   secret_value_from      = module.secrets_manager.secret_value_from
+  self_signup_enabled    = var.self_signup_enabled
 
   cognito_user_pool_id = module.cognito.user_pool_id
   cognito_client_id    = module.cognito.client_id

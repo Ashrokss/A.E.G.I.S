@@ -12,10 +12,12 @@ resource "aws_cognito_user_pool" "main" {
     enabled = true
   }
 
-  # Invite-only: accounts are created from the Admin page (Cognito + users row
-  # together). Flip to false, and add a sign-up flow, when AEGIS goes public.
+  # Self sign-up when public: the hosted UI's sign-up page verifies the email,
+  # and the api gives the verified identity a plain `user` row on first request
+  # (AEGIS_SELF_SIGNUP, set from the same variable). Otherwise invite-only:
+  # accounts are created from the Admin page.
   admin_create_user_config {
-    allow_admin_create_user_only = true
+    allow_admin_create_user_only = !var.self_signup_enabled
   }
 
   password_policy {

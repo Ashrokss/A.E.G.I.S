@@ -10,6 +10,7 @@ import Knowledge from "./pages/Knowledge";
 import Accounts from "./pages/Accounts";
 import Integrations from "./pages/Integrations";
 import Admin from "./pages/Admin";
+import Connect from "./pages/Connect";
 
 export default function App() {
   const { identity, ready } = useAuth();
@@ -22,7 +23,10 @@ export default function App() {
       {!identity ? (
         <Route path="*" element={<Login />} />
       ) : (
-        <Route element={<Shell />}>
+        <>
+          {/* A new sign-up's first screen: no app shell behind it. */}
+          <Route path="/connect" element={<Connect />} />
+          <Route element={<Shell />}>
           <Route path="/home" element={<Home />} />
           <Route path="/runs/:runId?" element={<Runs />} />
           <Route path="/inbox" element={<Inbox />} />
@@ -31,7 +35,8 @@ export default function App() {
           <Route path="/integrations" element={<Integrations />} />
           {identity.role === "admin" && <Route path="/admin" element={<Admin />} />}
           <Route path="*" element={<Navigate to="/home" replace />} />
-        </Route>
+          </Route>
+        </>
       )}
     </Routes>
   );

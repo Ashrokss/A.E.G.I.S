@@ -55,6 +55,63 @@ Resources:
             Resource:
               - !Sub arn:aws:iam::${AWS::AccountId}:role/AegisProvisioner-*
               - !Sub arn:aws:iam::${AWS::AccountId}:policy/AegisBoundary-*
+          # State files hold resource secrets; workloads never need them.
+          - Sid: NoTerraformState
+            Effect: Deny
+            Action: s3:*
+            Resource:
+              - arn:aws:s3:::aegis-tfstate-*
+              - arn:aws:s3:::aegis-tfstate-*/*
+
+  # Terraform state for every AEGIS run in this account, one key per run
+  # (runs/<run_id>/terraform.tfstate), locked with Terraform's S3 lockfile.
+  # Retained on stack deletion: losing state orphans the resources it tracks.
+  StateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub aegis-tfstate-${AWS::AccountId}-${RoleSuffix}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldStateVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  StateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt StateBucket.Arn
+              - !Sub ${StateBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
 
   ProvisionerRole:
     Type: AWS::IAM::Role
@@ -146,6 +203,26 @@ Resources:
                   - iam:CreateAccessKey
                   - iam:CreateLoginProfile
                 Resource: "*"
+              # Terraform needs Get/Put/Delete object (the lockfile) and List.
+              # Everything that could expose, weaken or erase state is denied.
+              - Sid: ProtectStateBucket
+                Effect: Deny
+                Action:
+                  - s3:DeleteBucket
+                  - s3:PutBucketPolicy
+                  - s3:DeleteBucketPolicy
+                  - s3:PutBucketVersioning
+                  - s3:PutLifecycleConfiguration
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutEncryptionConfiguration
+                  - s3:PutBucketAcl
+                  - s3:PutBucketOwnershipControls
+                  - s3:PutReplicationConfiguration
+                  - s3:DeleteObjectVersion
+                  - s3:PutObjectAcl
+                Resource:
+                  - !GetAtt StateBucket.Arn
+                  - !Sub ${StateBucket.Arn}/*
 
 Outputs:
   RoleArn:
@@ -154,3 +231,6 @@ Outputs:
   BoundaryArn:
     Description: Permissions boundary every AEGIS-created role must carry.
     Value: !Ref AegisBoundary
+  StateBucket:
+    Description: Terraform state for AEGIS runs in this account (runs/<run_id>/terraform.tfstate).
+    Value: !Ref StateBucket

@@ -22,6 +22,8 @@ type Run = {
   updated_at: string;
   jira_ticket_key: string | null;
   aws_account_id: string;
+  /** Demo only: when the last "Plan a fix" was asked for. */
+  driftFixAt?: string;
   messages: Msg[];
   steps: Array<{ created_at: string; name: string; args: string }>;
 };
@@ -165,8 +167,8 @@ const db = {
   runs: seedRuns(),
   inbox: [{ id: "demo-intake", ticket_key: "OPS-151", summary: "CloudFront distribution for the docs site", created_at: iso(35), status: "PENDING_INTAKE", state: "pending" }],
   accounts: [
-    { id: uuid(), status: "active", accountId: "123456789012", roleArn: "arn:aws:iam::123456789012:role/AegisProvisioner-default", displayName: "Sandbox", createdAt: iso(60 * 24 * 3) },
-  ] as Array<{ id: string; status: string; accountId: string; roleArn: string; displayName: string | null; createdAt: string }>,
+    { id: uuid(), status: "active", accountId: "123456789012", roleArn: "arn:aws:iam::123456789012:role/AegisProvisioner-default", stateBucket: "aegis-tfstate-123456789012-default", displayName: "Sandbox", createdAt: iso(60 * 24 * 3) },
+  ] as Array<{ id: string; status: string; accountId: string; roleArn: string; stateBucket: string | null; displayName: string | null; createdAt: string }>,
   connections: [
     { id: "github_demo", provider: "github", authMethod: "token", displayName: "acme/infrastructure", status: "active", lastError: null, lastValidatedAt: iso(55), createdAt: iso(60 * 24 * 2), config: {} },
   ] as Array<Record<string, unknown>>,
@@ -302,6 +304,40 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       touch(run, "AWAITING_INPUT");
       return send(res, { status: "discarded" });
     }
+    // Drift: the first check finds a hand-edited tag and a deleted route table;
+    // once a fix has been approved, the next check is clean.
+    if (rest === "/drift-check") {
+      const previous = run.status;
+      touch(run, "CHECKING_DRIFT");
+      later(2000, () => {
+        const fixed = !!run.driftFixAt && run.messages.some((x) => x.type === "approval" && x.created_at >= run.driftFixAt!);
+        say(run, JSON.stringify({
+          ok: true,
+          tracked: 6,
+          drifted: fixed ? [] : [
+            { address: "aws_vpc.main", kind: "changed", attributes: ["tags", "tags_all"] },
+            { address: "aws_route_table.private[1]", kind: "deleted", attributes: [] },
+          ],
+          checked_at: iso(),
+        }), "drift_report");
+        touch(run, previous);
+      });
+      return send(res, { status: "checking" });
+    }
+    if (rest === "/drift-fix") {
+      run.driftFixAt = iso();
+      touch(run, "PLANNING");
+      later(2000, () => {
+        say(run, 'Plan results:\n  ~ resource "aws_vpc.main" {\n      ~ tags = {\n          - "Owner" = "someone" -> null\n        }\n    }\n  + resource "aws_route_table" "private" {', "plan_preview");
+        say(run, JSON.stringify({ counts: { add: 1, change: 1, destroy: 0, replace: 0 }, changes: [
+          { address: "aws_route_table.private[1]", type: "aws_route_table", name: "private", actions: ["create"], kind: "create" },
+          { address: "aws_vpc.main", type: "aws_vpc", name: "main", actions: ["update"], kind: "update" },
+        ] }), "plan_summary");
+        say(run, "This plan puts the drifted resources back to what the code says. The `.tf` files are unchanged. Approve to apply it, or discard to keep the changes made in AWS.");
+        touch(run, "AWAITING_APPROVAL");
+      });
+      return send(res, { status: "planning" });
+    }
     if (rest === "/stop") {
       touch(run, "AWAITING_INPUT");
       return send(res, { status: "stopping" });
@@ -325,7 +361,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const roleArn = String(body.roleArn || "");
     const accountId = /::(\d{12}):/.exec(roleArn)?.[1];
     if (!accountId) return send(res, { error: "Not a valid IAM role ARN (arn:aws:iam::<account>:role/<name>)." }, 400);
-    const account = { id: uuid(), status: "active", accountId, roleArn, displayName: String(body.displayName || "") || null, createdAt: iso() };
+    const account = { id: uuid(), status: "active", accountId, roleArn, stateBucket: `aegis-tfstate-${accountId}-default`, displayName: String(body.displayName || "") || null, createdAt: iso() };
     db.accounts.push(account);
     return send(res, { ok: true, account });
   }

@@ -103,7 +103,7 @@ export function Dialog({
     <ShDialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         className={cn(
-          "max-h-[calc(100dvh-2rem)] gap-6 overflow-y-auto rounded-2xl border-line bg-surface p-6 sm:rounded-2xl",
+          "glass max-h-[calc(100dvh-2rem)] gap-6 overflow-y-auto rounded-2xl p-6 sm:rounded-2xl",
           wide ? "sm:max-w-xl" : "sm:max-w-md",
         )}
       >
@@ -120,7 +120,7 @@ export function Dialog({
 /** A centred, comfortably narrow page column. Bottom padding clears the mobile tab bar. */
 export function Page({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("mx-auto grid w-full max-w-5xl content-start gap-8 px-4 pt-6 pb-28 sm:px-6 sm:pt-10 md:pb-16", className)}>
+    <div className={cn("grid w-full max-w-6xl content-start gap-8 px-4 pt-6 pb-28 sm:px-6 sm:pt-8 md:pb-12 lg:px-10", className)}>
       {children}
     </div>
   );
@@ -168,7 +168,7 @@ export function RowMenu({
           <MoreHorizontal className="size-4" aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-48 rounded-xl border-line bg-surface p-1">
+      <DropdownMenuContent align="end" className="glass min-w-48 rounded-xl p-1">
         {items.map((i) => (
           <DropdownMenuItem
             key={i.label}

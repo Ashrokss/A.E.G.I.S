@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "../lib/auth";
+import { clearNextPath, nextPath, useAuth } from "../lib/auth";
 import { ErrorNote } from "../components/ui";
 
 export default function Callback() {
@@ -15,7 +15,11 @@ export default function Callback() {
     else if (code && state) completeSignIn(code, state).catch(setError);
   }, [params, completeSignIn]);
 
-  if (identity) return <Navigate to="/home" replace />;
+  useEffect(() => {
+    if (identity) clearNextPath();
+  }, [identity]);
+
+  if (identity) return <Navigate to={nextPath() ?? "/home"} replace />;
   return (
     <div className="grid h-full place-items-center p-8">
       {error ? (

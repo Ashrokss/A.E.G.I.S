@@ -22,6 +22,15 @@ const { encryptSecret, decryptSecret } = makeSecretBox(['AWS_ONBOARDING_ENC_KEY'
 // Abandoned onboarding attempts are cleaned up on the next /start.
 const PENDING_TTL = "interval '1 day'";
 
+/**
+ * AegisProvisioner-<suffix> -> the Terraform state bucket the same
+ * CloudFormation stack creates: aegis-tfstate-<account>-<suffix>.
+ */
+function stateBucketFor(roleArn) {
+  const m = /^arn:aws(?:-cn|-us-gov)?:iam::(\d{12}):role\/(?:.*\/)?AegisProvisioner-([a-z0-9-]+)$/.exec(roleArn || '');
+  return m ? `aegis-tfstate-${m[1]}-${m[2]}` : undefined;
+}
+
 /** Public view — never exposes the ExternalId. */
 function toPublicAccount(row) {
   return {
@@ -29,6 +38,7 @@ function toPublicAccount(row) {
     status: row.status,
     accountId: row.account_id,
     roleArn: row.role_arn,
+    stateBucket: stateBucketFor(row.role_arn) || null,
     displayName: row.display_name,
     createdAt: new Date(row.created_at).toISOString(),
   };
@@ -111,5 +121,5 @@ async function deleteAccount(ownerUserId, accountId) {
 }
 
 module.exports = {
-  createPending, getPending, activate, listAccounts, getAccountCreds, deleteAccount, toPublicAccount,
+  createPending, getPending, activate, listAccounts, getAccountCreds, deleteAccount, toPublicAccount, stateBucketFor,
 };

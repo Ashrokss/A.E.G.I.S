@@ -2,32 +2,16 @@ import { useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { SplitText } from "gsap/SplitText";
-import { TextPlugin } from "gsap/TextPlugin";
 import { DrawSVGPlugin } from "gsap/DrawSVGPlugin";
-import { ArrowRight, GitPullRequest, KeyRound, ScanEye } from "lucide-react";
+import { ArrowRight, Cloud, GitPullRequest, KeyRound, ScanEye } from "lucide-react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import AuroraCurtain from "@/components/smoothui/aurora-curtain";
-import BorderBeam from "@/components/smoothui/border-beam";
 import SmoothButton from "@/components/smoothui/smooth-button";
-import PlanGlyph, { type Action } from "@/components/PlanGlyph";
-import { useAuth } from "@/lib/auth";
+import { SIGNUP_ENABLED, useAuth } from "@/lib/auth";
 import ThemeSwitch from "@/components/ThemeSwitch";
 
-gsap.registerPlugin(useGSAP, SplitText, TextPlugin, DrawSVGPlugin);
-
-// The hero is what AEGIS exists to produce: a plan you read before anything
-// touches your account. One GSAP timeline plays the whole page, once.
-const PLAN: Array<{ action: Action; address: string }> = [
-  { action: "create", address: "aws_s3_bucket.artifacts" },
-  { action: "create", address: "aws_s3_bucket_versioning.artifacts" },
-  { action: "create", address: "aws_s3_bucket_lifecycle_configuration.artifacts" },
-  { action: "update", address: "aws_iam_role_policy.ci_publish" },
-  { action: "delete", address: "aws_instance.legacy_worker" },
-];
-const COUNTS = { add: 3, change: 1, destroy: 1 };
-const COMMAND = "terraform plan -out=tfplan";
+gsap.registerPlugin(useGSAP, SplitText, DrawSVGPlugin);
 
 const PROMISES = [
   { icon: ScanEye, text: "Every change shown as a plan before it happens" },
@@ -35,122 +19,55 @@ const PROMISES = [
   { icon: GitPullRequest, text: "A pull request with the code for every run" },
 ];
 
+// One GSAP timeline plays the page, once: the mark draws itself, the headline
+// comes into focus word by word, then the sign-in card opens from its centre.
 export default function Login() {
-  const { login, error } = useAuth();
-  const [busy, setBusy] = useState(false);
+  const { login, signup, error } = useAuth();
+  const [busy, setBusy] = useState<"login" | "signup" | null>(null);
   const root = useRef<HTMLDivElement>(null);
 
   useGSAP(
     (_ctx, contextSafe) => {
       const q = gsap.utils.selector(root);
-      const css = getComputedStyle(document.documentElement);
-      const teal = css.getPropertyValue("--teal").trim();
-      const amber = css.getPropertyValue("--amber").trim();
-      const counters = q<HTMLElement>("[data-count]");
-      const cmd = q<HTMLElement>("[data-cmd]")[0];
-
-      const showFinalState = () => {
-        cmd.textContent = COMMAND;
-        counters.forEach((el) => (el.textContent = String(COUNTS[el.dataset.count as keyof typeof COUNTS])));
-        gsap.set(root.current, { autoAlpha: 1 });
-      };
-
       const mm = gsap.matchMedia();
 
-      mm.add("(prefers-reduced-motion: reduce)", showFinalState);
+      mm.add("(prefers-reduced-motion: reduce)", () => {
+        gsap.set(root.current, { autoAlpha: 1 });
+      });
 
       mm.add("(prefers-reduced-motion: no-preference)", () => {
-        // Split after the webfonts load, or the line masks measure the fallback font.
+        // Split after the webfonts load, or the words measure the fallback font.
         const build = contextSafe!(() => {
           gsap.set(root.current, { autoAlpha: 1 });
 
-          const title = SplitText.create(q(".hero-title"), { type: "lines,words,chars", mask: "lines" });
-          const lead = SplitText.create(q(".hero-lead"), { type: "lines", mask: "lines" });
+          const css = getComputedStyle(document.documentElement);
+          const ramp = gsap.utils.interpolate(css.getPropertyValue("--teal").trim(), css.getPropertyValue("--amber").trim());
+          const title = SplitText.create(q(".hero-title"), { type: "words,chars" });
+          const grad = title.chars.filter((c) => c.closest(".hero-grad"));
+          grad.forEach((c, i) => ((c as HTMLElement).style.color = ramp(i / Math.max(grad.length - 1, 1))));
 
-          // The last line's characters sweep from teal to amber.
-          const gradChars = title.chars.filter((c) => c.closest(".hero-grad"));
-          const ramp = gsap.utils.interpolate(teal, amber);
-          gradChars.forEach((c, i) => ((c as HTMLElement).style.color = ramp(i / Math.max(gradChars.length - 1, 1))));
-
-          const tally = { add: 0, change: 0, destroy: 0 };
-          const tl = gsap.timeline({ defaults: { ease: "expo.out", duration: 1.1 } });
-
-          tl.from(q(".mark-shield"), { drawSVG: 0, duration: 1.3, ease: "power2.inOut" })
-            .from(q(".mark-plus"), { scale: 0, transformOrigin: "50% 50%", ease: "back.out(3)", duration: 0.7 }, "-=0.55")
-            .from(q(".wordmark"), { x: -14, autoAlpha: 0, duration: 0.9 }, "<")
-            .from(title.chars, { yPercent: 115, rotation: 8, stagger: 0.018, duration: 1.2 }, 0.2)
-            .from(lead.lines, { yPercent: 100, stagger: 0.09 }, "-=0.95")
-            .from(q(".signin"), { y: 48, autoAlpha: 0, scale: 0.97, duration: 1.3 }, "-=0.9")
-            .from(q(".signin-item"), { y: 14, autoAlpha: 0, stagger: 0.07, duration: 0.9 }, "-=1.0")
+          const tl = gsap.timeline({ defaults: { ease: "expo.out", duration: 1.2 } });
+          tl.from(q(".mark-shield"), { drawSVG: "50% 50%", duration: 1.1, ease: "power3.inOut" })
+            .from(q(".mark-plus"), { scale: 0, rotation: -90, transformOrigin: "50% 50%", ease: "back.out(2.5)", duration: 0.8 }, "-=0.45")
+            .from(q(".wordmark"), { autoAlpha: 0, letterSpacing: "0.4em", duration: 1.2 }, "<")
+            .from(title.words, { autoAlpha: 0, filter: "blur(14px)", y: 18, scale: 0.96, stagger: 0.07, duration: 1.1 }, 0.3)
+            .from(q(".hero-lead"), { autoAlpha: 0, filter: "blur(8px)", y: 10 }, "-=0.8")
+            .from(q(".promise"), { autoAlpha: 0, x: -10, stagger: 0.08, duration: 0.9 }, "-=0.9")
             .from(
-              q(".terminal"),
-              { y: 70, rotationX: 18, autoAlpha: 0, transformPerspective: 1400, transformOrigin: "50% 100%", duration: 1.6 },
-              0.45,
+              q(".signin"),
+              { clipPath: "inset(48% 48% 48% 48% round 14px)", scale: 0.94, autoAlpha: 0, duration: 1.4, ease: "expo.inOut" },
+              0.55,
             )
-            .to(cmd, { text: COMMAND, duration: 1.0, ease: "none" }, "-=0.6")
-            .from(q(".plan-line"), { autoAlpha: 0, x: -12, stagger: 0.16, duration: 0.6, ease: "power3.out" }, "+=0.15")
-            .to(
-              tally,
-              {
-                ...COUNTS,
-                duration: 0.9,
-                ease: "power2.out",
-                snap: { add: 1, change: 1, destroy: 1 },
-                onUpdate: () => counters.forEach((el) => (el.textContent = String(tally[el.dataset.count as keyof typeof COUNTS]))),
-              },
-              "-=0.5",
-            )
-            .from(q(".approval"), { y: 18, autoAlpha: 0, duration: 0.9 }, "-=0.3")
-            .from(q(".approve-btn"), { scale: 0.85, ease: "elastic.out(1, 0.45)", duration: 1.4 }, "<0.15");
-
-          // Continuous: the scene leans toward the pointer, with GSAP's smooth lag.
-          const lean = {
-            tx: gsap.quickTo(q(".terminal-float"), "x", { duration: 1.1, ease: "power3" }),
-            ty: gsap.quickTo(q(".terminal-float"), "y", { duration: 1.1, ease: "power3" }),
-            rx: gsap.quickTo(q(".terminal-float"), "rotationX", { duration: 1.1, ease: "power3" }),
-            ry: gsap.quickTo(q(".terminal-float"), "rotationY", { duration: 1.1, ease: "power3" }),
-            hx: gsap.quickTo(q(".hero-title"), "x", { duration: 1.4, ease: "power3" }),
-          };
-          gsap.set(q(".terminal-float"), { transformPerspective: 1400 });
-          const onMove = (e: PointerEvent) => {
-            const nx = e.clientX / window.innerWidth - 0.5;
-            const ny = e.clientY / window.innerHeight - 0.5;
-            lean.tx(nx * -22);
-            lean.ty(ny * -16);
-            lean.ry(nx * 7);
-            lean.rx(ny * -6);
-            lean.hx(nx * 10);
-          };
-          window.addEventListener("pointermove", onMove);
-
-          // Magnetic sign-in button.
-          const magnet = q<HTMLElement>(".magnet")[0];
-          const mx = gsap.quickTo(magnet, "x", { duration: 0.5, ease: "power3" });
-          const my = gsap.quickTo(magnet, "y", { duration: 0.5, ease: "power3" });
-          const onMagnet = (e: PointerEvent) => {
-            const r = magnet.getBoundingClientRect();
-            mx((e.clientX - (r.left + r.width / 2)) * 0.18);
-            my((e.clientY - (r.top + r.height / 2)) * 0.35);
-          };
-          const onRelease = () => gsap.to(magnet, { x: 0, y: 0, duration: 1.1, ease: "elastic.out(1, 0.35)" });
-          magnet.addEventListener("pointermove", onMagnet);
-          magnet.addEventListener("pointerleave", onRelease);
-
-          return () => {
-            window.removeEventListener("pointermove", onMove);
-            magnet.removeEventListener("pointermove", onMagnet);
-            magnet.removeEventListener("pointerleave", onRelease);
-          };
+            .from(q(".signin-item"), { y: 12, autoAlpha: 0, stagger: 0.06, duration: 0.9 }, "-=0.55")
+            .set(q(".signin"), { clearProps: "clipPath" });
         });
 
-        let cleanup: (() => void) | undefined;
         let cancelled = false;
         document.fonts.ready.then(() => {
-          if (!cancelled) cleanup = build();
+          if (!cancelled) build();
         });
         return () => {
           cancelled = true;
-          cleanup?.();
         };
       });
 
@@ -190,7 +107,7 @@ export default function Login() {
       {/* Hidden until GSAP has set every starting state: no flash of the final layout. */}
       <div
         ref={root}
-        className="invisible relative mx-auto grid min-h-dvh max-w-7xl items-center gap-12 px-6 py-10 sm:px-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-16"
+        className="invisible relative mx-auto grid min-h-dvh max-w-6xl items-center gap-12 px-6 py-16 sm:px-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] lg:gap-20"
       >
         <section className="grid max-w-xl gap-8">
           <div className="flex items-center gap-2.5 text-primary">
@@ -220,28 +137,41 @@ export default function Login() {
             </p>
           </div>
 
-          <div className="signin max-w-md">
-            <BorderBeam colorFrom="var(--teal)" colorTo="var(--amber)" duration={9} radius={14} size={120} pauseOnHover>
-              <Card className="gap-5 rounded-[14px] border-line bg-card/75 shadow-2xl shadow-black/10 backdrop-blur-xl dark:shadow-black/40">
+          <ul className="grid gap-3">
+            {PROMISES.map(({ icon: Icon, text }) => (
+              <li key={text} className="promise flex items-center gap-3 text-sm text-muted-foreground">
+                <span className="glass glass-flat grid size-8 shrink-0 place-items-center rounded-full text-primary">
+                  <Icon className="size-4" aria-hidden />
+                </span>
+                {text}
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="w-full max-w-md justify-self-center lg:justify-self-end">
+          <div className="signin">
+              <Card className="glass gap-5 rounded-2xl py-8">
                 <CardHeader className="signin-item">
-                  <CardTitle className="text-lg">Sign in to AEGIS</CardTitle>
-                  <CardDescription>Use the account your administrator invited.</CardDescription>
+                  <CardTitle className="text-xl">Sign in to AEGIS</CardTitle>
+                  <CardDescription>{SIGNUP_ENABLED ? "Welcome back. Sign in to your workspace." : "Use the account your administrator invited."}</CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4">
-                  <div className="magnet signin-item">
+                  <div className="signin-item">
                     <SmoothButton
                       variant="candy"
                       size="lg"
                       className="w-full [--btn-fg:var(--on-accent)] [--btn-hover:color-mix(in_oklab,var(--teal)_78%,black)] [--btn:var(--teal)]"
-                      loading={busy}
+                      loading={busy === "login"}
+                      disabled={!!busy}
                       suffix={<ArrowRight aria-hidden />}
                       onClick={async () => {
-                        setBusy(true);
+                        setBusy("login");
                         await login();
-                        setBusy(false);
+                        setBusy(null);
                       }}
                     >
-                      Continue with single sign-on
+                      {SIGNUP_ENABLED ? "Sign in" : "Continue with single sign-on"}
                     </SmoothButton>
                   </div>
                   {error && (
@@ -249,69 +179,50 @@ export default function Login() {
                       {error}
                     </p>
                   )}
-                  <Separator className="signin-item" />
-                  <ul className="grid gap-2.5">
-                    {PROMISES.map(({ icon: Icon, text }) => (
-                      <li key={text} className="signin-item flex items-start gap-3 text-sm text-muted-foreground">
-                        <Icon className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-                        {text}
-                      </li>
-                    ))}
-                  </ul>
+                  {SIGNUP_ENABLED ? (
+                    <>
+                      <div className="signin-item flex items-center gap-3 text-xs text-muted-foreground">
+                        <span className="h-px flex-1 bg-line" aria-hidden />
+                        New to AEGIS?
+                        <span className="h-px flex-1 bg-line" aria-hidden />
+                      </div>
+                      <div className="signin-item grid gap-2">
+                        <SmoothButton
+                          variant="outline"
+                          size="lg"
+                          className="w-full"
+                          loading={busy === "signup"}
+                          disabled={!!busy}
+                          prefix={<Cloud aria-hidden />}
+                          onClick={async () => {
+                            setBusy("signup");
+                            await signup();
+                            setBusy(null);
+                          }}
+                        >
+                          Connect your AWS account
+                        </SmoothButton>
+                        <p className="text-xs leading-relaxed text-muted-foreground">
+                          Create your login, then connect your account with a role you create through CloudFormation. You
+                          never share access keys.
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Separator className="signin-item" />
+                      <p className="signin-item text-sm text-muted-foreground">
+                        Nothing touches your AWS account until you approve the plan.
+                      </p>
+                    </>
+                  )}
                 </CardContent>
                 <CardFooter className="signin-item text-xs text-muted-foreground">
-                  Access is by invitation. No account yet? Ask your AEGIS administrator.
+                  {SIGNUP_ENABLED
+                    ? "Nothing touches your AWS account until you approve the plan."
+                    : "Access is by invitation. No account yet? Ask your AEGIS administrator."}
                 </CardFooter>
               </Card>
-            </BorderBeam>
-          </div>
-        </section>
-
-        <section aria-label="Example: a Terraform plan waiting for approval" className="hidden lg:block">
-          <div className="terminal-float grid gap-4 will-change-transform">
-            <div className="terminal overflow-hidden rounded-2xl border border-line bg-surface/90 shadow-2xl shadow-black/10 backdrop-blur-xl dark:shadow-black/50">
-              <div className="flex items-center gap-2 border-b border-line bg-raised/60 px-5 py-3.5">
-                <span className="size-3 rounded-full bg-rust/80" />
-                <span className="size-3 rounded-full bg-amber/80" />
-                <span className="size-3 rounded-full bg-teal/80" />
-                <span className="ml-3 text-xs text-muted-foreground">aegis ~ environments/prod</span>
-              </div>
-              <div className="grid gap-3 p-6 font-mono text-[14px]">
-                <p className="flex items-center gap-2">
-                  <span className="text-teal">$</span>
-                  <span data-cmd className="text-foreground" />
-                  <span className="inline-block h-4 w-2 animate-pulse bg-teal/80" aria-hidden />
-                </p>
-                <p className="plan-line font-sans text-sm text-muted-foreground">Terraform will perform the following actions</p>
-                <ul className="grid gap-2.5">
-                  {PLAN.map((row) => (
-                    <li key={row.address} className="plan-line flex items-baseline gap-4">
-                      <PlanGlyph action={row.action} className="w-5 text-2xl leading-none font-bold" />
-                      <span className={row.action === "delete" ? "text-rust" : "text-foreground"}>{row.address}</span>
-                    </li>
-                  ))}
-                </ul>
-                <p className="plan-line mt-2 border-t border-white/5 pt-4">
-                  Plan: <span className="text-teal"><span data-count="add">0</span> to add</span>,{" "}
-                  <span className="text-amber"><span data-count="change">0</span> to change</span>,{" "}
-                  <span className="text-rust"><span data-count="destroy">0</span> to destroy</span>.
-                </p>
-              </div>
-            </div>
-
-            <div className="approval flex items-center justify-between gap-4 rounded-xl border border-amber/30 bg-card/70 px-5 py-3.5 backdrop-blur-xl">
-              <Badge variant="outline" className="gap-1.5 border-amber/40 bg-amber/10 text-amber">
-                <span className="size-1.5 animate-pulse rounded-full bg-amber" />
-                Awaiting your approval
-              </Badge>
-              <span className="approve-btn relative inline-flex">
-                <span className="absolute inset-0 animate-ping rounded-md bg-primary/30 [animation-duration:2.4s]" />
-                <span className="relative rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground">
-                  Approve and apply
-                </span>
-              </span>
-            </div>
-            <p className="text-center text-sm text-muted-foreground">Nothing is applied until you approve it.</p>
           </div>
         </section>
       </div>

@@ -33,6 +33,8 @@ logger = logging.getLogger("uvicorn.error")
 # .terraform/ is a large provider-plugin cache). Shared with main.py's
 # workspace zip-download endpoint so the two exclusion lists never drift apart.
 from tools import repo_scaffold
+from tools.aws_creds import aws_env_for
+from tools.terraform import state_key
 
 # One copy, shared with the workspace listing and the zip download. Re-exported
 # here because main.py has always imported these two from this module.
@@ -218,6 +220,33 @@ def branch_name_for(run_id: str, jira_ticket_key: str | None = None, goal: str =
     return "".join(parts)
 
 
+def state_handoff(run_id: str) -> str:
+    """PR-body section saying where this run's state lives, so whoever applies
+    the merged code points their backend at it instead of creating everything
+    a second time. Empty when the run has no bound account."""
+    env = aws_env_for(run_id)
+    bucket, region = env.get("AEGIS_STATE_BUCKET"), env.get("AEGIS_STATE_REGION")
+    if not bucket or not region:
+        return ""
+    return (
+        "\n\n### Terraform state\n"
+        f"State for these resources is in your account: `s3://{bucket}/{state_key(run_id)}`. "
+        "To manage them from this repository, use that state as the backend "
+        "(if the module already has a backend, run `terraform init -migrate-state` after switching):\n\n"
+        "```hcl\n"
+        "terraform {\n"
+        '  backend "s3" {\n'
+        f'    bucket       = "{bucket}"\n'
+        f'    key          = "{state_key(run_id)}"\n'
+        f'    region       = "{region}"\n'
+        "    use_lockfile = true\n"
+        "    encrypt      = true\n"
+        "  }\n"
+        "}\n"
+        "```"
+    )
+
+
 def push_workspace_to_github(
     run_id: str,
     goal: str,
@@ -327,7 +356,7 @@ def push_workspace_to_github(
     )
     pr_body = (
         f"Automated Terraform provisioning{' for ' + jira_ticket_key if jira_ticket_key else ''}.\n\n"
-        f"**Goal:** {goal}\n\n{state}"
+        f"**Goal:** {goal}\n\n{state}{state_handoff(run_id)}"
     )
     owner = creds.repo_full_name.split("/", 1)[0]
     with httpx.Client(timeout=15) as client:

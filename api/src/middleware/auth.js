@@ -19,7 +19,9 @@
  *
  * A AEGIS USER EXISTS IN BOTH SYSTEMS. A valid Cognito identity with no
  * Postgres row is NOT a user: it gets 403 NOT_REGISTERED and no access. This
- * middleware never creates a row — accounts are made in the Admin Portal.
+ * middleware creates a row only for a public sign-up (AEGIS_SELF_SIGNUP), and
+ * only as a plain `user` with an email Cognito has verified; everything else
+ * is made in the Admin Portal, and admins only by scripts/create-admin.js.
  *
  * THE TWO GATES:
  *   requireAuthenticated — signed in, registered and enabled. The floor for
@@ -32,6 +34,37 @@ const jwt = require('jsonwebtoken');
 const jwksClient = require('jwks-rsa');
 
 const users = require('../users/store');
+const cognito = require('../cognito/users');
+
+/** Public sign-up is on. Terraform sets this from the same variable that opens
+ * the Cognito pool to self-registration, so the two cannot disagree. */
+function selfSignupEnabled() {
+  return String(process.env.AEGIS_SELF_SIGNUP || '').trim().toLowerCase() === 'true';
+}
+
+/**
+ * First request of someone who signed themselves up: give them a plain `user`
+ * row. The email and its verification are read from Cognito, never from the
+ * token or the browser. Never an admin. Returns the row, or null when this
+ * identity may not self-register (unverified, disabled, or its email already
+ * belongs to another AEGIS user).
+ */
+async function registerSelfSignup(claims) {
+  const account = await cognito.getUser(claims.username || claims.sub);
+  if (!account || account.cognitoSub !== claims.sub || !account.enabled || !account.emailVerified || !account.email) {
+    return null;
+  }
+  try {
+    const row = await users.createUser({ cognitoSub: claims.sub, email: account.email, role: 'user' });
+    console.log(`[Auth] self sign-up: registered ${row.email} as user`);
+    return row;
+  } catch (err) {
+    if (err.code !== 'USER_EXISTS') throw err;
+    // Same identity: a concurrent first request won the insert. Same email,
+    // other identity: refuse, never merge two logins into one user.
+    return err.on === 'cognito_sub' ? users.findByCognitoSub(claims.sub) : null;
+  }
+}
 
 function issuerUrl() {
   return (process.env.AWS_COGNITO_ISSUER_URL || '').trim().replace(/\/+$/, '');
@@ -168,9 +201,22 @@ async function authorizeClaims(claims) {
     };
   }
 
-  // Authenticated by Cognito, but not a AEGIS user. This is the rule that
-  // makes the Admin Portal the only way in: no row, no access, and no row is
-  // ever created here.
+  // Public sign-up: a verified self-registered identity becomes a plain user.
+  if (!row && selfSignupEnabled()) {
+    try {
+      row = await registerSelfSignup(claims);
+    } catch (err) {
+      console.error('[Auth] self sign-up registration failed:', err.message);
+      return {
+        ok: false,
+        status: 503,
+        body: { error: 'Your account could not be set up right now. Try again shortly.', code: 'AUTHZ_UNAVAILABLE' },
+      };
+    }
+  }
+
+  // Authenticated by Cognito, but not a AEGIS user: no row, no access. With
+  // public sign-up off, the Admin Portal is the only way in.
   if (!row) {
     console.warn(`[Auth] ${cognitoSub} authenticated but is not registered — refusing.`);
     return {
@@ -442,6 +488,46 @@ if (require.main === module) {
     for (const gone of ['privilegedGroups', 'roleGroups', 'requireTenantRole', 'requirePlatformLane']) {
       assert.strictEqual(authModule[gone], undefined, `${gone} must not exist any more`);
     }
+
+    // ── public sign-up ────────────────────────────────────────────────────
+    const realCreate = users.createUser;
+    const realGetUser = cognito.getUser;
+    let created = [];
+    users.createUser = async (u) => { created.push(u); return { cognito_sub: u.cognitoSub, email: u.email, role: u.role, enabled: true }; };
+    const signup = async (account, env = 'true') => {
+      process.env.AEGIS_SELF_SIGNUP = env;
+      cognito.getUser = async () => account;
+      stubLookup(null);
+      created = [];
+      return authorizeClaims(CLAIMS);
+    };
+    const VERIFIED = { cognitoSub: 'sub-123', email: 'new@client.test', emailVerified: true, enabled: true };
+
+    // A verified sign-up becomes a plain user, email taken from Cognito.
+    const fresh = await signup(VERIFIED);
+    assert.strictEqual(fresh.ok, true);
+    assert.strictEqual(fresh.user.role, 'user');
+    assert.deepStrictEqual(created, [{ cognitoSub: 'sub-123', email: 'new@client.test', role: 'user' }]);
+    // Switched off, nothing is created: invitation only.
+    assert.strictEqual((await signup(VERIFIED, 'false')).body.code, 'NOT_REGISTERED');
+    assert.strictEqual(created.length, 0);
+    // Unverified, disabled, missing, or a different identity: refused, nothing created.
+    for (const account of [{ ...VERIFIED, emailVerified: false }, { ...VERIFIED, enabled: false }, null, { ...VERIFIED, cognitoSub: 'other' }]) {
+      const out = await signup(account);
+      assert.strictEqual(out.body.code, 'NOT_REGISTERED', JSON.stringify(account));
+      assert.strictEqual(created.length, 0);
+    }
+    // Email already used by another AEGIS user: refused, never merged.
+    users.createUser = async () => { throw Object.assign(new Error('exists'), { code: 'USER_EXISTS', on: 'email' }); };
+    assert.strictEqual((await signup(VERIFIED)).body.code, 'NOT_REGISTERED');
+    // Cognito unreachable: fail closed.
+    cognito.getUser = async () => { throw new Error('down'); };
+    process.env.AEGIS_SELF_SIGNUP = 'true';
+    stubLookup(null);
+    assert.strictEqual((await authorizeClaims(CLAIMS)).status, 503);
+    delete process.env.AEGIS_SELF_SIGNUP;
+    users.createUser = realCreate;
+    cognito.getUser = realGetUser;
 
     users.findByCognitoSub = realFind;
     console.log('✅ middleware/auth.js self-check passed');

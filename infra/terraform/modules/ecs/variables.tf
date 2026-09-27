@@ -172,3 +172,9 @@ variable "model_max_output_tokens" {
   description = "Max output tokens per model call."
   type        = number
 }
+
+variable "self_signup_enabled" {
+  description = "Public sign-up: anyone can create an AEGIS login (verified email), becoming a plain user who connects their own AWS accounts. False = invitation only."
+  type        = bool
+  default     = false
+}

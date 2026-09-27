@@ -899,6 +899,38 @@ async def approve_run(run_id: str, background_tasks: BackgroundTasks, authorizat
     background_tasks.add_task(agent.step, run_id)
     return {"status": "approved"}
 
+# Statuses in which the agent is mid-work on a run; a drift check or fix waits.
+_BUSY_STATUSES = {"IDLE", "PLANNING", "APPLYING", "REPAIRING", "CHECKING_DRIFT"}
+
+
+async def _require_idle_run(run_id: str, authorization: str | None) -> dict:
+    _, row = await _require_run_owner(run_id, authorization)
+    lock = agent.run_locks.get(run_id)
+    if row.get("status") in _BUSY_STATUSES or (lock and lock.locked()):
+        raise HTTPException(status_code=409, detail="RUN_BUSY: AEGIS is still working on this run. Try again when it finishes.")
+    # Terraform talks to the account (and its state bucket): fresh STS creds.
+    await _rebind_run(run_id, authorization, row)
+    return row
+
+
+@app.post("/api/runs/{run_id}/drift-check")
+async def check_run_drift(run_id: str, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None)):
+    """Compare the account with this run's state (read-only). The result
+    arrives as a `drift_report` message."""
+    await _require_idle_run(run_id, authorization)
+    background_tasks.add_task(agent.check_drift, run_id)
+    return {"status": "checking"}
+
+
+@app.post("/api/runs/{run_id}/drift-fix")
+async def fix_run_drift(run_id: str, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None)):
+    """Plan the run's own configuration, which puts drifted resources back.
+    Nothing changes until the plan is approved."""
+    await _require_idle_run(run_id, authorization)
+    background_tasks.add_task(agent.plan_drift_fix, run_id)
+    return {"status": "planning"}
+
+
 @app.post("/api/runs/{run_id}/discard")
 async def discard_run(run_id: str, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None)):
     await _require_run_owner(run_id, authorization)

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Plus } from "lucide-react";
 import { request } from "@/lib/api";
 import { useAccounts } from "@/lib/hooks";
+import { useAuth } from "@/lib/auth";
 import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Button, Dialog, Empty, ErrorNote, Field, Page, PageHeader, Panel, RowMenu, RowSkeleton, inputClass } from "@/components/ui";
@@ -12,7 +13,14 @@ type Start = { onboardingId: string; externalId: string; launchUrl: string | nul
 export default function Accounts() {
   const qc = useQueryClient();
   const accounts = useAccounts();
-  const whoami = useQuery({ queryKey: ["whoami"], queryFn: () => request<{ accountId: string | null }>("/api/aws-accounts/whoami") });
+  const { identity } = useAuth();
+  const isAdmin = identity?.role === "admin";
+  // The operator's own account id is not something clients need to see.
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    enabled: isAdmin,
+    queryFn: () => request<{ accountId: string | null }>("/api/aws-accounts/whoami"),
+  });
   const [onboarding, setOnboarding] = useState(false);
   const remove = useMutation({
     mutationFn: (accountId: string) => request(`/api/aws-accounts/${accountId}`, { method: "DELETE" }),
@@ -48,6 +56,11 @@ export default function Accounts() {
                     <span className="px-1.5 text-line">/</span>
                     Connected {ago(a.createdAt)}
                   </p>
+                  {a.stateBucket && (
+                    <p className="mt-0.5 truncate text-xs text-muted" title="Terraform state for runs in this account">
+                      State in <span className="font-mono">s3://{a.stateBucket}</span>
+                    </p>
+                  )}
                 </div>
                 <RowMenu
                   items={[
@@ -64,13 +77,15 @@ export default function Accounts() {
         </Panel>
       )}
 
-      {whoami.data?.accountId && (
+      {isAdmin && whoami.data?.accountId && (
         <p className="text-sm text-muted">
           AEGIS itself runs in <span className="font-mono text-xs">{whoami.data.accountId}</span>. You can connect it too; runs still use
           the role, never AEGIS's own identity.
         </p>
       )}
-      <OnboardDialog open={onboarding} onClose={() => setOnboarding(false)} />
+      <Dialog open={onboarding} onClose={() => setOnboarding(false)} title="Connect an AWS account" wide>
+        <ConnectAccountForm onDone={() => setOnboarding(false)} onCancel={() => setOnboarding(false)} />
+      </Dialog>
     </Page>
   );
 }
@@ -92,7 +107,17 @@ function Step({ n, active, title, children }: { n: number; active: boolean; titl
   );
 }
 
-function OnboardDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** The two onboarding steps: launch the CloudFormation stack, paste the role ARN.
+ * Used by the Accounts dialog and by the full-screen /connect page for new sign-ups. */
+export function ConnectAccountForm({
+  onDone,
+  onCancel,
+  cancelLabel = "Cancel",
+}: {
+  onDone: () => void;
+  onCancel: () => void;
+  cancelLabel?: string;
+}) {
   const qc = useQueryClient();
   const [session, setSession] = useState<Start | null>(null);
   const [roleArn, setRoleArn] = useState("");
@@ -103,25 +128,15 @@ function OnboardDialog({ open, onClose }: { open: boolean; onClose: () => void }
     mutationFn: () => request("/api/aws-accounts/complete", { body: { onboardingId: session!.onboardingId, roleArn: roleArn.trim(), displayName: name.trim() } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["aws-accounts"] });
-      close();
+      onDone();
     },
   });
 
-  function close() {
-    setSession(null);
-    setRoleArn("");
-    setName("");
-    start.reset();
-    complete.reset();
-    onClose();
-  }
-
   return (
-    <Dialog open={open} onClose={close} title="Connect an AWS account" wide>
-      <ol className="grid gap-7">
+    <ol className="grid gap-7">
         <Step n={1} active title="Create the AEGIS role">
           <p className="text-sm text-muted">
-            Sign in to the AWS console for the account, then launch the stack. It creates one role that only AEGIS can assume.
+            Sign in to the AWS console for the account, then launch the stack. It creates a role that only AEGIS can assume, and the S3 bucket that holds the Terraform state for your runs.
           </p>
           {!session ? (
             <Button className="w-full sm:w-fit" onClick={() => start.mutate()} busy={start.isPending}>
@@ -169,8 +184,8 @@ function OnboardDialog({ open, onClose }: { open: boolean; onClose: () => void }
             </fieldset>
             <ErrorNote error={complete.error} />
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button type="button" variant="ghost" onClick={close}>
-                Cancel
+              <Button type="button" variant="ghost" onClick={onCancel}>
+                {cancelLabel}
               </Button>
               <Button type="submit" variant="primary" disabled={!session || !roleArn.trim()} busy={complete.isPending}>
                 Verify and connect
@@ -178,7 +193,6 @@ function OnboardDialog({ open, onClose }: { open: boolean; onClose: () => void }
             </div>
           </form>
         </Step>
-      </ol>
-    </Dialog>
+    </ol>
   );
 }

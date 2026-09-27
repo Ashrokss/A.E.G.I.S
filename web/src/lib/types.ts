@@ -17,6 +17,7 @@ export type RunStatus =
   | "AWAITING_APPROVAL"
   | "APPLYING"
   | "REPAIRING"
+  | "CHECKING_DRIFT"
   | "COMPLETED"
   | "FAILED";
 
@@ -68,6 +69,15 @@ export interface PlanChange {
   kind?: string;
 }
 
+/** A `drift_report` message: the account compared with the run's state. */
+export interface DriftReport {
+  ok: boolean;
+  error?: string;
+  tracked?: number;
+  drifted?: Array<{ address: string; kind: "changed" | "deleted"; attributes: string[] }>;
+  checked_at: string;
+}
+
 export interface PlanSummary {
   counts: { add: number; change: number; destroy: number; replace: number };
   changes: PlanChange[];
@@ -110,6 +120,8 @@ export interface AwsAccount {
   status: string;
   accountId: string;
   roleArn: string;
+  /** Where this account's Terraform state lives (created by the onboarding stack). */
+  stateBucket: string | null;
   displayName: string | null;
   createdAt: string;
 }

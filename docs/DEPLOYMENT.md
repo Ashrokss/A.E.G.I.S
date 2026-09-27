@@ -84,12 +84,15 @@ It prints a temporary password once. Sign in at the app URL, set a new password,
 
 ## 6. Connect your AWS account
 
+With public sign-up on (`self_signup_enabled = true` in `environments/prod/main.tf`), a client does this themselves: **Connect your AWS account** on the sign-in page creates their login (Cognito hosted sign-up, email verified) and lands them in this flow. They become a plain `user` and only ever see their own accounts and runs. Cognito's built-in email sender is capped at about 50 emails a day; move the pool to SES before real traffic. Every client's runs spend Bedrock tokens in *your* account, so watch the budget alarm.
+
 In the app, go to **Accounts → Connect an account**. AEGIS generates an ExternalId and a CloudFormation quick-create link for `infra/onboarding/aegis-provisioner-role.yaml`:
 
 - `AegisProvisioner-<suffix>`: PowerUserAccess, plus IAM limited to roles that carry the boundary. It trusts only the AEGIS task role, and only with that ExternalId.
 - `AegisBoundary-<suffix>`: the permissions boundary every role AEGIS creates must carry.
+- `aegis-tfstate-<account>-<suffix>`: Terraform state for every run in this account (`runs/<run_id>/terraform.tfstate`), versioned, encrypted, TLS-only, retained if the stack is deleted. The provisioner role can read and write state but cannot change the bucket's settings or delete old versions; roles AEGIS creates cannot touch it at all.
 
-Launch the stack in the target account, paste the `RoleArn` output back, then **Verify and connect**. You can connect the account AEGIS itself runs in the same way: runs still go through the role, never through AEGIS's own identity.
+Launch the stack in the target account, **in the region AEGIS runs in** (the state bucket must be there), paste the `RoleArn` output back, then **Verify and connect**. Verification assumes the role and checks the state bucket exists (`ONBOARDING_STATE_BUCKET_MISSING` otherwise: update the stack from the current template). You can connect the account AEGIS itself runs in the same way: runs still go through the role, never through AEGIS's own identity.
 
 ## Local development against real AWS
 
@@ -106,6 +109,8 @@ Deploy the same template once more with `RoleSuffix=local`, and set `TrustedRole
 | Inspect runs.db | `aws ecs execute-command ... --container agent --command "sqlite3 /mnt/agent/runs.db"` |
 | Prune old run workspaces | ECS Exec into `agent`, delete `/mnt/agent/runs/<old-id>`; the EFS size alarm fires at 20 GB. |
 | Logs | CloudWatch log group `/ecs/aegis` (streams `api/...`, `agent/...`). |
+| Find a run's state | In the target account: `s3://aegis-tfstate-<account>-<suffix>/runs/<run_id>/terraform.tfstate`. A pushed PR carries the matching backend block. |
+| Check a run for drift | Run menu → **Check for drift** (read-only). **Plan a fix** re-plans the run's code for approval. Checks are on demand: a scheduled check would need a service identity to fetch STS credentials, which AEGIS deliberately does not have. |
 | Turn on Jira intake | Put `JIRA_API_TOKEN` in the secret and add `JIRA_POLL_SECONDS`, `JIRA_BASE_URL`, `JIRA_EMAIL` to the agent environment in `modules/ecs`. |
 
 ## Upgrade paths (not built, on purpose)

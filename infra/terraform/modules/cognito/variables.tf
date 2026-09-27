@@ -29,3 +29,9 @@ variable "extra_logout_urls" {
   type        = list(string)
   default     = ["http://localhost:5173"]
 }
+
+variable "self_signup_enabled" {
+  description = "Public sign-up: anyone can create an AEGIS login (verified email), becoming a plain user who connects their own AWS accounts. False = invitation only."
+  type        = bool
+  default     = false
+}

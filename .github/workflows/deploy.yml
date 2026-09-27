@@ -101,6 +101,7 @@ jobs:
           out() { terraform -chdir="$TF_DIR" output -json "$1"; }
           export VITE_COGNITO_DOMAIN="$(out web_build_env | jq -r .VITE_COGNITO_DOMAIN)"
           export VITE_COGNITO_CLIENT_ID="$(out web_build_env | jq -r .VITE_COGNITO_CLIENT_ID)"
+          export VITE_SELF_SIGNUP="$(out web_build_env | jq -r .VITE_SELF_SIGNUP)"
           BUCKET="$(out web_bucket | jq -r .)"
           DIST="$(out distribution_id | jq -r .)"
           (cd web && npm ci && npm run build)

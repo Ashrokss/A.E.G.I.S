@@ -21,6 +21,11 @@ module "stack" {
 
   provisioner_template_path = "${path.root}/../../../onboarding/aegis-provisioner-role.yaml"
 
+  # Public sign-up: clients create their own login, then connect their own AWS
+  # accounts (CloudFormation role, no keys). Every sign-up can spend Bedrock
+  # tokens on this account; the budget alarm is the backstop.
+  self_signup_enabled = true
+
   vpc_cidr            = "10.40.0.0/16"
   public_subnet_cidrs = ["10.40.0.0/24", "10.40.1.0/24"]
   app_subnet_cidrs    = ["10.40.10.0/24", "10.40.11.0/24"]

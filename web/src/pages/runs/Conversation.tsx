@@ -4,12 +4,12 @@ import AIReasoning from "@/components/smoothui/ai-reasoning";
 import AIToolCall from "@/components/smoothui/ai-tool-call";
 import AILoader from "@/components/smoothui/ai-loader";
 import AIPromptInput from "@/components/smoothui/ai-prompt-input";
-import type { FormSpec, JiraTicket, PlanSummary, RunMessage, RunSnapshot, ToolStep } from "@/lib/types";
-import { tryJson } from "@/lib/format";
+import type { DriftReport, FormSpec, JiraTicket, PlanSummary, RunMessage, RunSnapshot, ToolStep } from "@/lib/types";
+import { ago, tryJson } from "@/lib/format";
 import Markdown from "@/components/Markdown";
 import Mark from "@/components/Mark";
-import { PlanCounts } from "@/components/PlanGlyph";
-import { Button } from "@/components/ui";
+import PlanGlyph, { PlanCounts } from "@/components/PlanGlyph";
+import { Button, ErrorNote } from "@/components/ui";
 import FormCard from "./FormCard";
 
 const HIDDEN = new Set(["plan_preview", "tf_step", "internal_log", "approval", "discard"]);
@@ -36,16 +36,19 @@ export default function Conversation({
   hideLatestPlan,
   onSend,
   onOpenPlan,
+  onFixDrift,
 }: {
   snapshot?: RunSnapshot;
   working: boolean;
   hideLatestPlan?: boolean;
   onSend: (text: string) => void;
   onOpenPlan: () => void;
+  onFixDrift?: () => void;
 }) {
   const messages = useMemo(() => snapshot?.messages ?? [], [snapshot]);
   const steps = snapshot?.steps ?? [];
   const latestPlan = useMemo(() => messages.map((m) => m.type).lastIndexOf("plan_summary"), [messages]);
+  const latestDrift = useMemo(() => messages.map((m) => m.type).lastIndexOf("drift_report"), [messages]);
 
   const activity = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -76,6 +79,7 @@ export default function Conversation({
               answered={messages.slice(i + 1).some((n) => n.role === "user")}
               onSend={onSend}
               onOpenPlan={onOpenPlan}
+              onFixDrift={i === latestDrift && !working ? onFixDrift : undefined}
             />
           </li>
         );
@@ -125,6 +129,7 @@ function Entry({
   answered,
   onSend,
   onOpenPlan,
+  onFixDrift,
 }: {
   message: RunMessage;
   steps: ToolStep[];
@@ -132,6 +137,7 @@ function Entry({
   answered: boolean;
   onSend: (t: string) => void;
   onOpenPlan: () => void;
+  onFixDrift?: () => void;
 }) {
   if (m.role === "user") {
     return (
@@ -154,6 +160,11 @@ function Entry({
         <span className="ml-auto text-sm text-teal">Review</span>
       </button>
     );
+  }
+
+  if (m.type === "drift_report") {
+    const d = tryJson<DriftReport>(m.content);
+    return d ? <DriftCard report={d} onFix={onFixDrift} /> : null;
   }
 
   if (m.type === "form") {
@@ -210,6 +221,55 @@ function Entry({
           <Markdown>{m.content}</Markdown>
         </div>
       </AIMessage>
+    </div>
+  );
+}
+
+/** The account compared with the run's state (terraform plan -refresh-only). */
+function DriftCard({ report: d, onFix }: { report: DriftReport; onFix?: () => void }) {
+  if (!d.ok) {
+    return <ErrorNote error={new Error(d.error || "The drift check could not run.")} />;
+  }
+  const drifted = d.drifted ?? [];
+  if (drifted.length === 0) {
+    return (
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-2xl border border-line bg-surface px-5 py-4">
+        <span className="font-medium">No drift</span>
+        <span className="text-sm text-muted">
+          {d.tracked === 1 ? "The 1 resource matches" : `All ${d.tracked ?? 0} resources match`} the state. Checked {ago(d.checked_at)}.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="grid gap-3 rounded-2xl border border-amber/35 bg-amber/[0.06] p-4 sm:p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="font-medium">
+          {drifted.length} of {d.tracked ?? drifted.length} {d.tracked === 1 ? "resource" : "resources"} changed outside Terraform
+        </p>
+        <span className="text-xs text-muted">Checked {ago(d.checked_at)}</span>
+      </div>
+      <ul className="grid gap-2">
+        {drifted.map((r) => (
+          <li key={r.address} className="grid grid-cols-[1.25rem_minmax(0,1fr)] items-baseline gap-2">
+            <PlanGlyph action={r.kind === "deleted" ? "delete" : "update"} className="text-lg leading-none" />
+            <div className="min-w-0">
+              <p className="font-mono text-[13px] break-all">{r.address}</p>
+              <p className="text-xs text-muted">
+                {r.kind === "deleted" ? "No longer exists in AWS" : `Changed: ${r.attributes.join(", ") || "attributes"}`}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {onFix && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
+          <Button size="sm" variant="primary" onClick={onFix}>
+            Plan a fix
+          </Button>
+          <span className="text-xs text-muted">Puts them back to what the code says. Or ask me to update the code to match AWS.</span>
+        </div>
+      )}
     </div>
   );
 }

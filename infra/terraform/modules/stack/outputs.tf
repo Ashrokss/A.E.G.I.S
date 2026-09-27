@@ -49,6 +49,7 @@ output "web_build_env" {
   value = {
     VITE_COGNITO_DOMAIN    = module.cognito.hosted_ui_url
     VITE_COGNITO_CLIENT_ID = module.cognito.client_id
+    VITE_SELF_SIGNUP       = tostring(var.self_signup_enabled)
   }
 }
 

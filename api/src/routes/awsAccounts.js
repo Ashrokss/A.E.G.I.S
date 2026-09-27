@@ -8,8 +8,9 @@
 
 const express = require('express');
 const { STSClient, GetCallerIdentityCommand } = require('@aws-sdk/client-sts');
+const { S3Client, HeadBucketCommand } = require('@aws-sdk/client-s3');
 
-const { requireAuthenticated } = require('../middleware/auth');
+const { requireAuthenticated, requireAdmin } = require('../middleware/auth');
 const store = require('../aws/accountStore');
 const roleProvider = require('../aws/roleProvider');
 
@@ -73,15 +74,37 @@ router.post('/api/aws-accounts/complete', requireAuthenticated, async (req, res)
     return res.status(404).json({ error: 'Onboarding session not found or expired — start again.', code: 'ONBOARDING_NOT_FOUND' });
   }
   const accountId = accountIdFromArn(roleArn);
+  const stateBucket = store.stateBucketFor(roleArn);
+  if (!stateBucket) {
+    return res.status(400).json({ error: 'Expected the role created by the AEGIS template (AegisProvisioner-<suffix>).', code: 'ROLE_ARN_INVALID' });
+  }
 
+  let creds;
   try {
-    const creds = await roleProvider.assumeRole(roleArn, `aegis-onboarding-${Date.now()}`, pending.externalId);
+    creds = await roleProvider.assumeRole(roleArn, `aegis-onboarding-${Date.now()}`, pending.externalId);
     const identity = await roleProvider.verifyCredentials(creds);
     if (identity.account !== accountId) {
       return res.status(400).json({ error: `Assumed role reports account ${identity.account}, expected ${accountId}.` });
     }
   } catch (err) {
     return res.status(400).json({ error: err instanceof Error ? err.message : 'Role validation failed', code: 'ROLE_ASSUME_FAILED' });
+  }
+
+  // Terraform state lives in the account, in the bucket the same stack creates.
+  // Checked here so a stack from an older template, or one created in another
+  // region, fails at onboarding instead of at the first `terraform init`.
+  try {
+    const s3 = new S3Client({
+      region: region(),
+      credentials: { accessKeyId: creds.accessKeyId, secretAccessKey: creds.secretAccessKey, sessionToken: creds.sessionToken },
+    });
+    await s3.send(new HeadBucketCommand({ Bucket: stateBucket }));
+  } catch (err) {
+    console.warn(`[AwsAccounts] state bucket check failed for ${accountId}: ${err.name || err.message}`);
+    return res.status(400).json({
+      error: `The Terraform state bucket ${stateBucket} was not found in ${region()}. Create (or update) the AEGIS stack from the current template, in ${region()}.`,
+      code: 'ONBOARDING_STATE_BUCKET_MISSING',
+    });
   }
 
   const row = await store.activate(req.user.id, onboardingId, { accountId, roleArn, displayName });
@@ -95,9 +118,10 @@ router.get('/api/aws-accounts', requireAuthenticated, async (req, res) => {
   res.json({ accounts });
 });
 
-// ─── Which account does AEGIS itself run in? (shown in the onboarding UI) ─
+// ─── Which account does AEGIS itself run in? Admins only: clients never
+// need the operator's account id. ─────────────────────────────────────────
 let cachedIdentity;
-router.get('/api/aws-accounts/whoami', requireAuthenticated, async (_req, res) => {
+router.get('/api/aws-accounts/whoami', requireAuthenticated, requireAdmin, async (_req, res) => {
   if (cachedIdentity) return res.json(cachedIdentity);
   try {
     const out = await new STSClient({ region: region() }).send(new GetCallerIdentityCommand({}));
@@ -138,6 +162,10 @@ router.get('/api/aws-accounts/internal/provisioning-creds', requireAuthenticated
       // Every role the agent writes must carry this boundary (the provisioner
       // role cannot create one without it). Reaches Terraform as a TF_VAR.
       TF_VAR_aegis_permissions_boundary: boundaryArnFor(account.roleArn),
+      // Where this account's Terraform state lives (the agent passes these as
+      // -backend-config; Terraform reaches the bucket with the creds above).
+      AEGIS_STATE_BUCKET: store.stateBucketFor(account.roleArn),
+      AEGIS_STATE_REGION: region(),
     });
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : 'Failed to assume the account role' });
@@ -158,6 +186,12 @@ if (require.main === module) {
     assert.ok(names.includes('requireAuthenticated'), `${l.route.path} must require authentication`);
   }
   const creds = layers.filter((l) => l.route.path.includes('provisioning-creds'));
+
+  // State bucket naming matches the CloudFormation template.
+  assert.strictEqual(store.stateBucketFor('arn:aws:iam::123456789012:role/AegisProvisioner-default'), 'aegis-tfstate-123456789012-default');
+  assert.strictEqual(store.stateBucketFor('arn:aws:iam::123456789012:role/path/AegisProvisioner-team-a'), 'aegis-tfstate-123456789012-team-a');
+  assert.strictEqual(store.stateBucketFor('arn:aws:iam::123456789012:role/SomethingElse'), undefined);
+  assert.strictEqual(store.stateBucketFor('arn:aws:iam::123456789012:role/AegisProvisioner-Upper'), undefined);
   assert.strictEqual(creds.length, 1, 'exactly one provisioning-creds registration (no internal-key lane)');
   assert.strictEqual(accountIdFromArn('arn:aws:iam::123456789012:role/AegisProvisioner-x'), '123456789012');
   assert.strictEqual(accountIdFromArn('arn:aws:iam::bad:role/x'), null);

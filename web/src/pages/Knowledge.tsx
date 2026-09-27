@@ -33,7 +33,7 @@ export default function Knowledge() {
     ...(identity?.role === "admin" ? [{ id: "review", label: "Review" }] : []),
   ];
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col px-4 sm:px-6">
+    <div className="flex w-full max-w-6xl flex-col px-4 sm:px-6 lg:px-10">
       <div className="grid gap-5 pt-6 sm:pt-10">
         <PageHeader title="Knowledge" description="Answers from your team's own runbooks and standards, with every source cited." />
         <AnimatedTabs variant="segment" tabs={tabs} activeTab={view} onChange={(id) => setView(id as View)} className="w-full sm:w-fit" />
@@ -92,7 +92,7 @@ function Ask() {
                 <History aria-hidden /> History
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="max-h-80 w-72 overflow-y-auto rounded-xl border-line bg-surface p-1">
+            <DropdownMenuContent align="end" className="glass max-h-80 w-72 overflow-y-auto rounded-xl p-1">
               <DropdownMenuLabel className="px-2.5 text-xs font-normal text-muted">Your questions</DropdownMenuLabel>
               {threads.data?.map((t) => (
                 <DropdownMenuItem key={t.id} onSelect={() => setThreadId(t.id)} className="grid gap-0.5 rounded-lg px-2.5 py-2">

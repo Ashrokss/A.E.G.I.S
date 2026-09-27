@@ -6,6 +6,7 @@ from typing import Dict, Any
 
 from tools.aws_creds import aws_env_for
 from utils.workspace_paths import (
+    BACKEND_FILE_NAME,
     EXCLUDED_DIR_NAMES,
     EXCLUDED_FILE_NAMES,
     EXCLUDED_FILE_SUFFIXES,
@@ -43,6 +44,75 @@ def _terraform_env(run_id: str | None = None) -> dict[str, str]:
     # The run's own temporary STS creds for the account it is bound to.
     env.update(aws_env_for(run_id))
     return env
+
+
+class StateBackendUnavailable(Exception):
+    """The run has no state bucket, i.e. no bound account. Never falls back to local state."""
+
+
+_BACKEND_TF = 'terraform {\n  backend "s3" {}\n}\n'
+
+
+def state_key(run_id: str) -> str:
+    return f"runs/{run_id}/terraform.tfstate"
+
+
+def backend_config_args(run_id: str) -> list[str]:
+    """`terraform init` flags for the run's S3 backend in the target account.
+
+    The bucket arrives with the run's STS creds (api provisioning-creds), and
+    Terraform reaches it with those same creds, so state lives in the client's
+    account and is written only by the assumed AegisProvisioner role.
+    """
+    env = aws_env_for(run_id)
+    bucket = env.get("AEGIS_STATE_BUCKET")
+    region = env.get("AEGIS_STATE_REGION") or env.get("AWS_REGION")
+    if not bucket or not region:
+        raise StateBackendUnavailable(run_id)
+    return [
+        # The settings are the same on every init; -reconfigure just never asks
+        # to migrate, which -input=false would turn into a failure.
+        "-reconfigure",
+        f"-backend-config=bucket={bucket}",
+        f"-backend-config=key={state_key(run_id)}",
+        f"-backend-config=region={region}",
+        "-backend-config=use_lockfile=true",
+        "-backend-config=encrypt=true",
+    ]
+
+
+# Saved refresh-only plan. Holds a state snapshot, so like tfplan it never
+# leaves the platform (EXCLUDED_FILE_NAMES).
+DRIFT_PLAN = "driftplan"
+
+
+def _count_managed(module: dict) -> int:
+    n = sum(1 for r in (module.get("resources") or []) if r.get("mode") == "managed")
+    return n + sum(_count_managed(c) for c in (module.get("child_modules") or []))
+
+
+def parse_drift(show_json: dict) -> dict:
+    """`terraform show -json <refresh-only plan>` -> {tracked, drifted[]}.
+
+    `resource_drift` lists what changed in the account since the last apply,
+    outside Terraform: an edited attribute is "changed", a resource that no
+    longer exists is "deleted".
+    """
+    drifted = []
+    for rc in show_json.get("resource_drift") or []:
+        change = rc.get("change") or {}
+        actions = set(change.get("actions") or [])
+        if not actions or actions <= {"no-op", "read"}:
+            continue
+        before, after = change.get("before") or {}, change.get("after") or {}
+        if "delete" in actions:
+            kind, attributes = "deleted", []
+        else:
+            kind = "changed"
+            attributes = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))[:8]
+        drifted.append({"address": rc.get("address"), "kind": kind, "attributes": attributes})
+    prior = ((show_json.get("prior_state") or {}).get("values") or {}).get("root_module") or {}
+    return {"tracked": _count_managed(prior), "drifted": drifted}
 
 
 class TerraformTool:
@@ -266,8 +336,16 @@ class TerraformTool:
         """
         return self.run_command(run_id, ["terraform", "fmt", "-recursive"], at_root=True)
 
+    def init_command(self, run_id: str) -> list[str]:
+        """Write the platform's backend file into the root module and return the
+        init command. Raises StateBackendUnavailable when the run has no bucket."""
+        args = backend_config_args(run_id)
+        with open(os.path.join(self._module_path(run_id), BACKEND_FILE_NAME), "w", encoding="utf-8", newline="\n") as f:
+            f.write(_BACKEND_TF)
+        return ["terraform", "init", "-no-color", "-input=false", *args]
+
     def init(self, run_id: str) -> Dict[str, Any]:
-        return self.run_command(run_id, ["terraform", "init", "-no-color", "-input=false"])
+        return self.run_command(run_id, self.init_command(run_id))
 
     def validate(self, run_id: str) -> Dict[str, Any]:
         """Syntax and provider schema check; run after init and before plan."""

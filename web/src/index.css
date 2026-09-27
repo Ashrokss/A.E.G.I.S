@@ -183,7 +183,12 @@
   }
 
   body {
-    background: var(--bg);
+    /* A faint ambient glow, fixed to the viewport, so glass chrome has colour to
+       pick up. Kept low enough that content panels still sit on calm ground. */
+    background:
+      radial-gradient(55% 45% at 85% 0%, color-mix(in oklab, var(--teal) 9%, transparent), transparent 70%) fixed,
+      radial-gradient(45% 40% at 0% 100%, color-mix(in oklab, var(--amber) 6%, transparent), transparent 70%) fixed,
+      var(--bg);
     color: var(--fg);
     font-family: var(--font-sans);
     font-size: 15px;
@@ -207,6 +212,56 @@
 
   ::selection {
     background: color-mix(in srgb, var(--teal) 30%, transparent);
+  }
+}
+
+/* Liquid glass, the web version: frosted and saturated, a translucent edge,
+   a specular highlight on the top edge and a soft shadow underneath. Reserved
+   for floating chrome (sidebar, bars, menus, dialogs), never content panels.
+   Deliberately unlayered, so it wins over the bg/border/shadow utilities that
+   shadcn components carry by default. */
+.glass {
+  background-color: color-mix(in oklab, var(--surface) 58%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+  border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in oklab, white 14%, transparent),
+    inset 0 -1px 0 0 color-mix(in oklab, black 12%, transparent),
+    0 12px 40px -12px rgb(0 0 0 / 0.45);
+}
+:root[data-theme="light"] .glass {
+  background-color: color-mix(in oklab, var(--surface) 62%, transparent);
+  box-shadow:
+    inset 0 1px 0 0 color-mix(in oklab, white 80%, transparent),
+    inset 0 -1px 0 0 color-mix(in oklab, black 4%, transparent),
+    0 12px 40px -16px rgb(0 0 0 / 0.18);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .glass {
+    background-color: color-mix(in oklab, var(--surface) 62%, transparent);
+    box-shadow:
+      inset 0 1px 0 0 color-mix(in oklab, white 80%, transparent),
+      inset 0 -1px 0 0 color-mix(in oklab, black 4%, transparent),
+      0 12px 40px -16px rgb(0 0 0 / 0.18);
+  }
+}
+/* A flatter variant for small controls sitting on glass or near it. */
+.glass-flat {
+  box-shadow: inset 0 1px 0 0 color-mix(in oklab, white 10%, transparent);
+}
+
+/* Solid where translucency is unwanted or unsupported: readability first. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass {
+    background-color: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass {
+    background-color: var(--surface);
   }
 }
 

@@ -165,7 +165,13 @@ async function getUser(username, client = defaultClient()) {
     const resp = await client.send(new AdminGetUserCommand({
       UserPoolId: requirePool(), Username: String(username),
     }));
-    return { username: resp.Username, cognitoSub: subOf(resp), email: attr(resp, 'email'), enabled: resp.Enabled };
+    return {
+      username: resp.Username,
+      cognitoSub: subOf(resp),
+      email: attr(resp, 'email'),
+      emailVerified: attr(resp, 'email_verified') === 'true',
+      enabled: resp.Enabled,
+    };
   } catch (err) {
     if (err?.name === 'UserNotFoundException') return null;
     throw err;

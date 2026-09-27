@@ -5,7 +5,7 @@ import json
 import asyncio
 import re
 from datetime import datetime
-from tools.terraform import TerraformTool
+from tools.terraform import DRIFT_PLAN, StateBackendUnavailable, TerraformTool, parse_drift
 from utils.model_client import ModelClient
 from utils.workspace_paths import WorkspacePathError
 from utils.logger import add_run_log
@@ -31,6 +31,7 @@ _SKILL_PROMPT = load_skill("terraform-provisioning")
 # These are configuration problems, not Terraform problems — rewriting .tf files
 # cannot fix them, so the repair loop must not be spent on them.
 _CREDENTIAL_ERROR_MARKERS = (
+    "provisioning_account_unbound",  # our own: no state bucket, i.e. no bound account
     "no valid credential sources found",
     "failed to refresh cached credentials",
     "no ec2 imds role found",
@@ -943,18 +944,18 @@ class ProvisioningAgent:
         # must always use the container's/assumed-role's ambient AWS
         # credentials (env), never hardcoded keys committed into the workspace.
         # Never allow remote state configuration, whatever the repository does.
-        # Copying the customer's `backend "s3"` makes `terraform init` adopt their
-        # real state, `plan` diff production, and an approved apply mutate it. The
-        # platform plans on local state and adds the backend at delivery time.
+        # The model never writes a backend: the platform adds the S3 backend in the
+        # target account (tools/terraform.py, _aegis_backend.tf), and copying a
+        # customer's `backend "s3"` would make `terraform init` adopt THEIR state.
         if re.search(r'^\s*backend\s+"[a-z0-9]+"\s*\{', txt, re.MULTILINE):
             errs.append(
-                "Do not write a `backend { ... }` block. Planning runs against local state; "
-                "the platform adds the repository's backend configuration when it delivers the code."
+                "Do not write a `backend { ... }` block. AEGIS configures state itself, in an S3 "
+                "bucket in the target account."
             )
         if re.search(r'^\s*cloud\s*\{', txt, re.MULTILINE):
             errs.append(
                 "Do not write a `cloud { ... }` block (Terraform Cloud/HCP remote state). "
-                "Planning runs against local state."
+                "AEGIS configures state itself, in an S3 bucket in the target account."
             )
 
         # A module source must resolve inside this run's workspace: an absolute or
@@ -1063,8 +1064,18 @@ class ProvisioningAgent:
 
         add_run_log(run_id, "INFO: Running terraform init")
         self._emit_tf_step(run_id, "init", "running")
+        try:
+            # State lives in the target account's S3 bucket; with no bucket there
+            # is no bound account, and local state is never a fallback.
+            init_cmd = TF_TOOL.init_command(run_id)
+        except StateBackendUnavailable:
+            msg = "ERROR: PROVISIONING_ACCOUNT_UNBOUND: no AWS account (and so no state bucket) is bound to this run"
+            add_run_log(run_id, msg)
+            self._emit_tf_step(run_id, "init", "failed")
+            add_run_log(run_id, "DONE")
+            return False, "\n".join(full_log + [msg])
         init_exit = None
-        async for log in TF_TOOL.run_command_stream(run_id, ["terraform", "init", "-no-color", "-input=false"]):
+        async for log in TF_TOOL.run_command_stream(run_id, init_cmd):
             if run_id in self.stop_signals and self.stop_signals[run_id].is_set():
                 await TF_TOOL.stop_run_process(run_id)
                 add_run_log(run_id, "INFO: Operation stopped by user during terraform init")
@@ -1190,6 +1201,82 @@ class ProvisioningAgent:
             })
         return {"counts": counts, "changes": changes, "raw": data}
 
+    async def check_drift(self, run_id: str) -> None:
+        """Has the account changed outside Terraform since this run applied?
+
+        `terraform plan -refresh-only` against the run's state in the target
+        account. Read-only: neither the account nor the state is changed. The
+        answer is one `drift_report` message; the run's status is restored.
+        """
+        lock = self.run_locks.setdefault(run_id, asyncio.Lock())
+        async with lock:
+            previous = (self._get_run(run_id) or {}).get("status") or "COMPLETED"
+            self._update_status(run_id, "CHECKING_DRIFT")
+            try:
+                report = await self._drift_report(run_id)
+            except Exception as e:
+                logger.exception(f"[{run_id}] drift check failed: {e}")
+                report = {"ok": False, "error": "The drift check could not run. The Logs tab has the details."}
+            finally:
+                self._update_status(run_id, previous)
+            report["checked_at"] = datetime.utcnow().isoformat()
+            self._add_message(run_id, "agent", json.dumps(report), "drift_report")
+
+    async def _drift_report(self, run_id: str) -> dict:
+        try:
+            init_cmd = TF_TOOL.init_command(run_id)
+        except StateBackendUnavailable:
+            return {"ok": False, "error": "PROVISIONING_ACCOUNT_UNBOUND: this run is not bound to an AWS account."}
+        plan_cmd = ["terraform", "plan", "-refresh-only", "-no-color", "-input=false", f"-out={DRIFT_PLAN}"]
+        add_run_log(run_id, "INFO: Checking for drift (terraform plan -refresh-only)")
+        for cmd in (init_cmd, plan_cmd):
+            exit_code, lines = None, []
+            async for log in TF_TOOL.run_command_stream(run_id, cmd):
+                add_run_log(run_id, log)
+                lines.append(log)
+                if isinstance(log, str) and log.startswith("EXIT:"):
+                    try:
+                        exit_code = int(log.split(":", 1)[1].strip())
+                    except ValueError:
+                        exit_code = 1
+            if exit_code != 0:
+                add_run_log(run_id, "DONE")
+                if _is_credentials_error("\n".join(str(l) for l in lines)):
+                    return {"ok": False, "error": "PROVISIONING_ACCOUNT_UNBOUND: AEGIS could not sign in to this account."}
+                return {"ok": False, "error": f"terraform {cmd[1]} failed. The Logs tab has the output."}
+        shown = TF_TOOL.run_command(run_id, ["terraform", "show", "-json", DRIFT_PLAN])
+        add_run_log(run_id, "DONE")
+        return {"ok": True, **parse_drift(json.loads(shown.get("stdout") or "{}"))}
+
+    async def plan_drift_fix(self, run_id: str) -> None:
+        """Plan the configuration as written, which puts drifted resources back.
+
+        No code changes: the ordinary plan of the run's own .tf files, published
+        for approval like any other plan (Approve applies it).
+        """
+        lock = self.run_locks.setdefault(run_id, asyncio.Lock())
+        async with lock:
+            self._destroy_pending[run_id] = False
+            success, logs = await self._run_plan_and_publish(run_id)
+            if not success:
+                self._update_status(run_id, "AWAITING_INPUT")
+                self._add_message(
+                    run_id, "agent",
+                    "I couldn't plan the fix (see the **Logs** tab). Tell me what changed and I can adjust the code instead.",
+                    "text",
+                )
+                return
+            self._add_message(run_id, "agent", f"Plan results:\n{logs}", "plan_preview")
+            summary = self._compute_plan_summary(run_id)
+            if summary:
+                self._add_message(run_id, "agent", json.dumps(summary), "plan_summary")
+            self._add_message(
+                run_id, "agent",
+                "This plan puts the drifted resources back to what the code says. "
+                "The `.tf` files are unchanged. Approve to apply it, or discard to keep the changes made in AWS.",
+                "text",
+            )
+
     # Locked workflow: map a run status to a phase {n, name} for the chat step chip.
     _PHASE_MAP = {
         "IDLE": (1, "Understand"),
@@ -1198,6 +1285,7 @@ class ProvisioningAgent:
         "AWAITING_APPROVAL": (4, "Review"),
         "APPLYING": (5, "Apply"),
         "REPAIRING": (6, "Repair"),
+        "CHECKING_DRIFT": (7, "Done"),
         "COMPLETED": (7, "Done"),
         "FAILED": (7, "Done"),
     }
@@ -2210,9 +2298,10 @@ class ProvisioningAgent:
                     self._add_message(
                         run_id, "agent",
                         "**PROVISIONING_ACCOUNT_UNBOUND: this run has no AWS credentials.**\n\n"
-                        "The Terraform itself is fine — `init` and `validate` both passed. Only `plan` "
-                        "failed, because it is the first step that talks to AWS. AEGIS never falls back "
-                        "to its own identity, so every run must be bound to one of your accounts.\n\n"
+                        "Nothing is wrong with the Terraform itself: `init` needs AWS to reach this "
+                        "account's state bucket, and `plan` needs it to read the account. AEGIS never "
+                        "falls back to its own identity or to local state, so every run must be bound "
+                        "to one of your accounts.\n\n"
                         "**To fix it:** onboard an account on the **Accounts** page if you haven't, then "
                         "start this work again with that account selected.",
                         "error",  # visible in /snapshot ("assistant"-typed rows are filtered out)

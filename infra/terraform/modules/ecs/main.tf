@@ -57,6 +57,7 @@ locals {
 
       AWS_ONBOARDING_TEMPLATE_URL = var.onboarding_template_url
       AEGIS_TASK_ROLE_ARN         = var.task_role_arn
+      AEGIS_SELF_SIGNUP           = tostring(var.self_signup_enabled)
     })
     agent = merge(local.cognito_env, local.bedrock_env, {
       AWS_REGION           = var.aws_region

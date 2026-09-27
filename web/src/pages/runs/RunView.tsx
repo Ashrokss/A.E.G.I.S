@@ -59,6 +59,10 @@ export default function RunView({ runId }: { runId: string }) {
     onError: () => setApprovalKey((k) => k + 1),
   });
   const push = useMutation({ mutationFn: () => request(`${base}/push-to-github`, { body: {} }), onSuccess: refresh });
+  const drift = useMutation({
+    mutationFn: (action: "drift-check" | "drift-fix") => request(`${base}/${action}`, { method: "POST" }),
+    onSuccess: refresh,
+  });
   const send = useMutation({
     mutationFn: (content: string) => request(`${base}/messages`, { body: { role: "user", content, type: "text" } }),
     onSuccess: refresh,
@@ -68,7 +72,7 @@ export default function RunView({ runId }: { runId: string }) {
   const destroys = (plan?.counts.destroy ?? 0) + (plan?.counts.replace ?? 0);
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-3.5rem-1px)] w-full max-w-5xl flex-col px-4 sm:px-6 md:h-[calc(100dvh-4rem-1px)]">
+    <div className="flex h-[calc(100dvh-3.5rem-1px)] w-full max-w-6xl flex-col px-4 sm:px-6 md:h-dvh lg:px-10">
       <header className="grid shrink-0 gap-3 pt-3 sm:gap-5 sm:pt-7">
         <div className="flex items-center justify-between gap-2">
           <Link to="/runs" className="-ml-1 inline-flex items-center gap-1 rounded-lg px-1 py-1 text-sm text-muted hover:text-fg">
@@ -84,6 +88,14 @@ export default function RunView({ runId }: { runId: string }) {
               label="Run actions"
               items={[
                 { label: push.isPending ? "Pushing…" : "Push to GitHub", onSelect: () => push.mutate(), disabled: push.isPending },
+                {
+                  label: "Check for drift",
+                  onSelect: () => {
+                    setTab("chat");
+                    drift.mutate("drift-check");
+                  },
+                  disabled: meta.working || drift.isPending,
+                },
                 { label: "Download workspace", onSelect: () => download(`${base}/download`, `aegis-${runId.slice(0, 8)}.zip`) },
               ]}
             />
@@ -112,7 +124,7 @@ export default function RunView({ runId }: { runId: string }) {
           onChange={(id) => setTab(id as Tab)}
           className="w-full sm:w-fit"
         />
-        <ErrorNote error={snap.error || push.error || act.error || send.error} />
+        <ErrorNote error={snap.error || push.error || act.error || send.error || drift.error} />
       </header>
 
       {tab === "chat" ? (
@@ -124,6 +136,7 @@ export default function RunView({ runId }: { runId: string }) {
               hideLatestPlan={awaiting}
               onSend={(t) => send.mutate(t)}
               onOpenPlan={() => setTab("plan")}
+              onFixDrift={() => drift.mutate("drift-fix")}
             />
           </div>
         </AIConversation>

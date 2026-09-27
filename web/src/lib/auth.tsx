@@ -11,12 +11,25 @@ type Tokens = { accessToken: string; idToken?: string; refreshToken?: string; ex
 const SESSION_KEY = "aegis.session";
 const PKCE_KEY = "aegis.pkce";
 const REFUSAL_KEY = "aegis.refusal";
+const NEXT_KEY = "aegis.next";
+
+/** Public sign-up is on for this deployment (Terraform self_signup_enabled). */
+export const SIGNUP_ENABLED = import.meta.env.VITE_SELF_SIGNUP === "true" || import.meta.env.VITE_DEMO === "1";
+
+/** Where to land after sign-in, if a flow asked for somewhere specific. Same-app paths only. */
+export function nextPath(): string | null {
+  const p = sessionStorage.getItem(NEXT_KEY);
+  return p && p.startsWith("/") && !p.startsWith("//") ? p : null;
+}
+export const clearNextPath = () => sessionStorage.removeItem(NEXT_KEY);
 
 type AuthState = {
   ready: boolean;
   identity: Identity | null;
   error: string | null;
   login: () => Promise<void>;
+  /** Create a login (Cognito hosted sign-up), then go straight to connecting an AWS account. */
+  signup: () => Promise<void>;
   logout: () => void;
   completeSignIn: (code: string, state: string) => Promise<void>;
 };
@@ -114,21 +127,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [tokens, store, logout]);
 
-  const login = useCallback(async () => {
-    // Demo mode (npm run demo): no Cognito, the in-memory mock answers /api/auth/me.
-    // VITE_DEMO is inlined at build time, so a normal build drops this branch entirely.
-    if (import.meta.env.VITE_DEMO === "1") {
-      store({ accessToken: "demo", expiresAt: Date.now() + 12 * 3_600_000 });
-      const me = await request<{ user: Identity }>("/api/auth/me");
-      setIdentity(me.user);
-      return;
-    }
+  // Both the sign-in and the sign-up page of the hosted UI take the same
+  // code + PKCE parameters and return to /auth/callback.
+  const openHostedUi = useCallback(async (page: "/oauth2/authorize" | "/signup") => {
     if (authConfigError) return setError(authConfigError);
     sessionStorage.removeItem(REFUSAL_KEY);
     const state = randomString();
     const verifier = randomString(64);
     sessionStorage.setItem(PKCE_KEY, JSON.stringify({ state, verifier }));
-    const url = new URL(`${COGNITO_DOMAIN}/oauth2/authorize`);
+    const url = new URL(`${COGNITO_DOMAIN}${page}`);
     url.search = new URLSearchParams({
       response_type: "code",
       client_id: COGNITO_CLIENT_ID,
@@ -139,7 +146,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       code_challenge_method: "S256",
     }).toString();
     window.location.href = url.toString();
-  }, [store]);
+  }, []);
+
+  const login = useCallback(async () => {
+    clearNextPath();
+    // Demo mode (npm run demo): no Cognito, the in-memory mock answers /api/auth/me.
+    // VITE_DEMO is inlined at build time, so a normal build drops this branch entirely.
+    if (import.meta.env.VITE_DEMO === "1") {
+      store({ accessToken: "demo", expiresAt: Date.now() + 12 * 3_600_000 });
+      const me = await request<{ user: Identity }>("/api/auth/me");
+      setIdentity(me.user);
+      return;
+    }
+    await openHostedUi("/oauth2/authorize");
+  }, [store, openHostedUi]);
+
+  const signup = useCallback(async () => {
+    sessionStorage.setItem(NEXT_KEY, "/connect");
+    if (import.meta.env.VITE_DEMO === "1") {
+      store({ accessToken: "demo", expiresAt: Date.now() + 12 * 3_600_000 });
+      window.location.assign("/connect");
+      return;
+    }
+    await openHostedUi("/signup");
+  }, [store, openHostedUi]);
 
   const completeSignIn = useCallback(
     async (code: string, state: string) => {
@@ -171,8 +201,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ ready, identity, error, login, logout, completeSignIn }),
-    [ready, identity, error, login, logout, completeSignIn],
+    () => ({ ready, identity, error, login, signup, logout, completeSignIn }),
+    [ready, identity, error, login, signup, logout, completeSignIn],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

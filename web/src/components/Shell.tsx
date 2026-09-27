@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useMatch } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Cloud, House, Inbox, LogOut, Plug, Users, Workflow, type LucideIcon } from "lucide-react";
+import { BookOpen, ChevronsUpDown, Cloud, House, Inbox, LogOut, Plug, Users, Workflow, type LucideIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +18,8 @@ import ThemeSwitch from "./ThemeSwitch";
 
 type Item = { to: string; label: string; icon: LucideIcon; badge?: number };
 
+// Desktop: a fixed sidebar (brand, navigation, theme and account at the foot).
+// Phones: a slim top bar plus a floating bottom nav, hidden inside a run.
 export default function Shell() {
   const { identity, logout } = useAuth();
   // A run is a focused screen with its own composer: no tab bar over it.
@@ -39,69 +41,109 @@ export default function Shell() {
     ...(identity?.role === "admin" ? [{ to: "/admin", label: "People", icon: Users }] : []),
   ];
   const initial = (identity?.email ?? "?").slice(0, 1).toUpperCase();
+  const roleLabel = identity?.role === "admin" ? "Administrator" : "Member";
+
+  const brand = (
+    <NavLink to="/home" className="flex items-center gap-2 text-teal" aria-label="AEGIS home">
+      <Mark className="size-6" />
+      <span className="font-display text-[17px] font-bold tracking-[0.06em] text-fg">AEGIS</span>
+    </NavLink>
+  );
+
+  const accountMenu = (trigger: React.ReactNode, align: "start" | "end") => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+      <DropdownMenuContent align={align} side={align === "start" ? "top" : "bottom"} className="glass min-w-56 rounded-xl p-1">
+        <DropdownMenuLabel className="px-2.5 py-2 font-normal">
+          <p className="truncate text-sm">{identity?.email}</p>
+          <p className="text-xs text-muted">{roleLabel}</p>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator className="bg-line" />
+        <DropdownMenuItem onSelect={logout} className="rounded-lg px-2.5 py-2">
+          <LogOut className="size-4" aria-hidden /> Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
+  const avatar = (
+    <span className="grid size-8 shrink-0 place-items-center rounded-full border border-line bg-raised text-sm font-semibold">{initial}</span>
+  );
 
   return (
     <div className="min-h-full">
-      <header className="sticky top-0 z-30 border-b border-line/70 bg-bg/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-5xl items-center gap-4 px-4 sm:px-6 md:h-16">
-          <NavLink to="/home" className="flex items-center gap-2 text-teal" aria-label="AEGIS home">
-            <Mark className="size-6" />
-            <span className="font-display text-[17px] font-bold tracking-[0.06em] text-fg">AEGIS</span>
-          </NavLink>
+      {/* ── Desktop sidebar ─────────────────────────────────────────────── */}
+      <aside className="glass fixed inset-y-3 left-3 z-30 hidden w-56 flex-col rounded-2xl md:flex">
+        <div className="flex h-16 items-center px-5">{brand}</div>
 
-          <nav aria-label="Main" className="mx-auto hidden items-center gap-0.5 rounded-full border border-line bg-surface/70 p-1 md:flex">
-            {items.map(({ to, label, icon: Icon, badge }) => (
-              <NavLink
-                key={to}
-                to={to}
-                className={({ isActive }) =>
-                  cn(
-                    "relative inline-flex h-8 items-center gap-2 rounded-full px-3.5 text-sm transition-colors",
-                    isActive ? "bg-raised text-fg shadow-sm" : "text-muted hover:text-fg",
-                  )
-                }
-              >
-                <Icon className="size-4" aria-hidden />
-                {label}
-                {!!badge && <span className="size-1.5 rounded-full bg-amber" aria-label={`${badge} waiting`} />}
-              </NavLink>
-            ))}
-          </nav>
+        <nav aria-label="Main" className="no-scrollbar grid flex-1 content-start gap-0.5 overflow-y-auto px-3 py-2">
+          {items.map(({ to, label, icon: Icon, badge }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                cn(
+                  "group relative flex h-9 items-center gap-3 rounded-lg px-3 text-sm transition-colors",
+                  isActive ? "bg-raised font-medium text-fg" : "text-muted hover:bg-raised/50 hover:text-fg",
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-teal" aria-hidden />}
+                  <Icon className={cn("size-4 shrink-0", isActive && "text-teal")} aria-hidden />
+                  <span className="flex-1">{label}</span>
+                  {!!badge && (
+                    <span className="grid h-5 min-w-5 place-items-center rounded-full bg-amber/15 px-1.5 text-[11px] font-medium text-amber" aria-label={`${badge} waiting`}>
+                      {badge}
+                    </span>
+                  )}
+                </>
+              )}
+            </NavLink>
+          ))}
+        </nav>
 
-          <div className="ml-auto flex items-center gap-2 md:ml-0">
-          <ThemeSwitch />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className="grid size-9 place-items-center rounded-full border border-line bg-surface text-sm font-semibold transition-colors hover:border-muted/40"
-                aria-label="Account menu"
-              >
-                {initial}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-56 rounded-xl border-line bg-surface p-1">
-              <DropdownMenuLabel className="px-2.5 py-2 font-normal">
-                <p className="truncate text-sm">{identity?.email}</p>
-                <p className="text-xs text-muted">{identity?.role === "admin" ? "Administrator" : "Member"}</p>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator className="bg-line" />
-              <DropdownMenuItem onSelect={logout} className="rounded-lg px-2.5 py-2">
-                <LogOut className="size-4" aria-hidden /> Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+        <div className="grid gap-3 border-t border-fg/10 p-3">
+          <ThemeSwitch className="w-full justify-between [&>button]:flex-1" />
+          {accountMenu(
+            <button className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-raised/60" aria-label="Account menu">
+              {avatar}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm">{identity?.email}</span>
+                <span className="block text-xs text-muted">{roleLabel}</span>
+              </span>
+              <ChevronsUpDown className="size-4 shrink-0 text-muted" aria-hidden />
+            </button>,
+            "start",
+          )}
+        </div>
+      </aside>
+
+      {/* ── Phone top bar ───────────────────────────────────────────────── */}
+      <header className="glass sticky top-0 z-30 md:hidden">
+        <div className="flex h-14 items-center gap-3 px-4">
+          {brand}
+          <div className="ml-auto flex items-center gap-2">
+            <ThemeSwitch />
+            {accountMenu(
+              <button className="rounded-full transition-opacity hover:opacity-80" aria-label="Account menu">
+                {avatar}
+              </button>,
+              "end",
+            )}
           </div>
         </div>
       </header>
 
-      <main>
+      <main className="md:pl-[15.5rem]">
         <Outlet />
       </main>
 
       {!inRun && (
         <nav
           aria-label="Main"
-          className="fixed inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 mx-auto flex w-fit items-center gap-1 rounded-full border border-line bg-surface/90 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl md:hidden"
+          className="fixed inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 mx-auto flex w-fit items-center gap-1 rounded-full p-1.5 glass md:hidden"
         >
           {items.map(({ to, label, icon: Icon, badge }) => (
             <NavLink
