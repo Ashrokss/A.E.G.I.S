@@ -5,6 +5,7 @@
 ## How it fits together
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "linear"}}}%%
 flowchart LR
   browser(["Browser"]) --> cf["CloudFront"]
   cf -- "/*" --> s3[("S3<br/>React SPA, private, OAC")]
