@@ -47,11 +47,22 @@ Cognito proves identity; PostgreSQL (`users.role`) decides permission, re-read o
 Prerequisites: Docker, Node 20, Python 3.11, Terraform ≥ 1.11, an AWS profile that can call Bedrock.
 
 ```bash
-cp .env.example .env              # fill Cognito values (terraform output cognito) and two keys: openssl rand -hex 32
+# 1. A Cognito pool just for local sign-in (free tier; `terraform destroy` removes it)
+cd infra/terraform/environments/local && terraform init && terraform apply
+terraform output -raw env        # paste over the Cognito block of the root .env
+terraform output -raw web_env > ../../../../web/.env.local
+cd ../../../..
+
+# 2. The rest of .env: POSTGRES_PASSWORD, AWS_PROFILE, and two keys (openssl rand -hex 32)
+cp .env.example .env              # (before pasting the Cognito lines above)
+
+# 3. Run it
 docker compose up --build         # postgres + api (:3005) + agent (:8000)
-cd web && npm install && npm run dev   # http://localhost:5173 (proxies to the containers)
 docker compose exec api node scripts/create-admin.js you@example.com
+cd web && npm install && npm run dev   # http://localhost:5173 (proxies to the containers)
 ```
+
+To provision for real, launch `infra/onboarding/aegis-provisioner-role.yaml` in the target account (us-east-1) with the ExternalId the **Connect** dialog shows, `RoleSuffix=local` and `TrustedRoleArn` = your own IAM identity (for SSO, the `AWSReservedSSO_…` role ARN), set `AEGIS_TASK_ROLE_ARN` in `.env` to that identity, then paste the stack's `RoleArn` into the dialog.
 
 Leave the `BEDROCK_MODEL*` values blank to run the agent in mock mode.
 

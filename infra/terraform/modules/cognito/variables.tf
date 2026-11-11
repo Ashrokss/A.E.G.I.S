@@ -35,3 +35,9 @@ variable "self_signup_enabled" {
   type        = bool
   default     = false
 }
+
+variable "deletion_protection" {
+  description = "Refuse to delete the pool (and every login in it). Off only for a throwaway local pool."
+  type        = bool
+  default     = true
+}
